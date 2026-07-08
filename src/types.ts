@@ -3,6 +3,8 @@ export interface Organization {
   name: string;
   logo?: string;
   themeColor?: string;
+  address?: string;
+  phone?: string;
 }
 
 export interface Facility {

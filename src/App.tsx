@@ -33,6 +33,10 @@ export default function App() {
   // Local state for platform administration forms
   const [newOrgNameAdmin, setNewOrgNameAdmin] = useState('');
   const [newOrgColor, setNewOrgColor] = useState('#4f46e5');
+  const [newOrgAddress, setNewOrgAddress] = useState('');
+  const [newOrgAdminName, setNewOrgAdminName] = useState('');
+  const [newOrgAdminEmail, setNewOrgAdminEmail] = useState('');
+  const [newOrgAdminPhone, setNewOrgAdminPhone] = useState('');
   const [newManagerEmail, setNewManagerEmail] = useState('');
   const [vendorSearchQuery, setVendorSearchQuery] = useState('');
   const [newFacilityName, setNewFacilityName] = useState('');
@@ -243,21 +247,77 @@ export default function App() {
   // SuperAdmin: Create Organization
   const handleCreateOrgAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newOrgNameAdmin.trim()) return;
+    if (!newOrgNameAdmin.trim() || !newOrgAdminEmail.trim() || !newOrgAdminName.trim()) {
+      addToast('Organization Name, Admin Name, and Admin Email are required.', 'warning');
+      return;
+    }
     const generatedOrgId = `org-${Math.floor(Math.random() * 1000000)}`;
-    const { error } = await supabase.from('organizations').insert({
-      id: generatedOrgId,
-      name: newOrgNameAdmin,
-      theme_color: newOrgColor
-    });
-    if (error) {
-      addToast(`Error: ${error.message}`, 'warning');
-    } else {
-      addToast('Organization created successfully!', 'success');
-      setNewOrgNameAdmin('');
+
+    if (isSupabaseConfigured) {
+      const { error: orgError } = await supabase.from('organizations').insert({
+        id: generatedOrgId,
+        name: newOrgNameAdmin.trim(),
+        theme_color: newOrgColor,
+        address: newOrgAddress.trim() || null,
+        phone: newOrgAdminPhone.trim() || null
+      });
+
+      if (orgError) {
+        addToast(`Error creating organization: ${orgError.message}`, 'warning');
+        return;
+      }
+
+      await supabase.from('member_invitations').insert({
+        organization_id: generatedOrgId,
+        email: newOrgAdminEmail.trim(),
+        role: 'admin'
+      });
+
+      try {
+        const { error: fnError } = await supabase.functions.invoke('send-invite', {
+          body: {
+            email: newOrgAdminEmail.trim(),
+            role: 'admin',
+            orgId: generatedOrgId
+          }
+        });
+        if (fnError) {
+          console.warn('Edge function failed:', fnError);
+          addToast('Mailer unavailable. Please copy invitation link manually.', 'info');
+        } else {
+          addToast('Organization created & Admin invitation email dispatched!', 'success');
+        }
+      } catch (err) {
+        console.warn('Edge function error:', err);
+        addToast('Could not reach invite service. Fallback link generated.', 'info');
+      }
+
       const freshOrgs = await fetchOrganizations();
       setOrganizations(freshOrgs);
+    } else {
+      const newOrg: Organization = {
+        id: generatedOrgId,
+        name: newOrgNameAdmin.trim(),
+        themeColor: newOrgColor,
+        address: newOrgAddress.trim() || undefined,
+        phone: newOrgAdminPhone.trim() || undefined
+      };
+      
+      const stored = getStoredData();
+      const updatedOrgs = [...stored.orgs, newOrg];
+      localStorage.setItem('fm_v3_orgs', JSON.stringify(updatedOrgs));
+      setOrganizations(updatedOrgs);
+      addToast('Organization created locally!', 'success');
     }
+
+    const inviteLink = `${window.location.origin}/signup?inviteType=member&email=${encodeURIComponent(newOrgAdminEmail.trim())}`;
+    setActiveInviteLink(inviteLink);
+
+    setNewOrgNameAdmin('');
+    setNewOrgAddress('');
+    setNewOrgAdminName('');
+    setNewOrgAdminEmail('');
+    setNewOrgAdminPhone('');
   };
 
   // OrgAdmin: Invite Manager
@@ -1049,6 +1109,18 @@ export default function App() {
                         required
                       />
                     </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Organization Location / Address</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. 100 Main St, Austin, TX"
+                        value={newOrgAddress}
+                        onChange={(e) => setNewOrgAddress(e.target.value)}
+                      />
+                    </div>
+
                     <div className="form-group">
                       <label className="form-label">Theme Branding Color</label>
                       <input
@@ -1058,7 +1130,47 @@ export default function App() {
                         onChange={(e) => setNewOrgColor(e.target.value)}
                       />
                     </div>
-                    <button type="submit" className="glow-btn w-full py-2">Create Organization</button>
+
+                    <div className="border-t border-white/10 pt-3 mt-3">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-app-primary mb-3">System Admin Details</h4>
+                      
+                      <div className="form-group mb-3">
+                        <label className="form-label">Admin Name *</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="e.g. Jane Doe"
+                          value={newOrgAdminName}
+                          onChange={(e) => setNewOrgAdminName(e.target.value)}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-group mb-3">
+                        <label className="form-label">Admin Email *</label>
+                        <input
+                          type="email"
+                          className="form-input"
+                          placeholder="admin@organization.com"
+                          value={newOrgAdminEmail}
+                          onChange={(e) => setNewOrgAdminEmail(e.target.value)}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Admin Phone / Telephone</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="512-555-0188"
+                          value={newOrgAdminPhone}
+                          onChange={(e) => setNewOrgAdminPhone(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <button type="submit" className="glow-btn w-full py-2">Create Organization & Invite Admin</button>
                   </form>
                 </section>
 

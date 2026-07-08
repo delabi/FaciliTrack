@@ -46,7 +46,14 @@ export async function fetchOrganizations(): Promise<Organization[]> {
     console.error('Error fetching organizations:', error);
     return [];
   }
-  return data || [];
+  return (data || []).map(row => ({
+    id: row.id,
+    name: row.name,
+    logo: row.logo,
+    themeColor: row.theme_color,
+    address: row.address,
+    phone: row.phone
+  }));
 }
 
 export async function fetchFacilities(): Promise<Facility[]> {
