@@ -10,6 +10,7 @@ import {
 } from './utils/supabaseSync';
 import { Organization, Facility, User, Vendor, RepairRequest } from './types';
 import { TenantReportForm } from './components/TenantReportForm';
+import { AuthScreen } from './components/AuthScreen';
 import { QrScannerView } from './components/QrScannerView';
 import { QrCodeManager } from './components/QrCodeManager';
 import { DashboardStats } from './components/DashboardStats';
@@ -49,6 +50,10 @@ export default function App() {
   // Toasts notification state
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'warning' }[]>([]);
 
+  // Proper Auth States
+  const [session, setSession] = useState<any>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+
   const addToast = (message: string, type: 'success' | 'info' | 'warning' = 'info') => {
     const id = `toast-${Math.floor(Math.random() * 1000000)}`;
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -57,47 +62,99 @@ export default function App() {
     }, 4000);
   };
 
+  // Fetch profile and data helpers
+  const loadUserProfile = async (userId: string) => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) throw error;
+
+      if (profile) {
+        const userObj: User = {
+          id: profile.id,
+          organizationId: profile.organization_id || '',
+          name: profile.name,
+          email: profile.email,
+          role: profile.role,
+          vendorId: profile.vendor_id || undefined
+        };
+        setCurrentUser(userObj);
+        setCurrentRole(profile.role);
+        setSelectedOrgId(profile.organization_id || 'org-4');
+      }
+    } catch (err) {
+      console.error('Error loading user profile:', err);
+    }
+  };
+
   // Load initial data
   useEffect(() => {
-    const data = getStoredData();
-    setOrganizations(data.orgs);
-    setFacilities(data.facilities);
-    setVendors(data.vendors);
-    setUsers(data.users);
-    setRequests(data.requests);
-
-    // Set default user as the manager of org-4
-    const defaultUser = data.users.find((u: User) => u.organizationId === 'org-4' && u.role === 'manager');
-    if (defaultUser) {
-      setCurrentUser(defaultUser);
-      setCurrentRole('manager');
+    if (!isSupabaseConfigured) {
+      const data = getStoredData();
+      setOrganizations(data.orgs);
+      setFacilities(data.facilities);
+      setVendors(data.vendors);
+      setUsers(data.users);
+      setRequests(data.requests);
+      const defaultUser = data.users.find((u: User) => u.organizationId === 'org-4' && u.role === 'manager');
+      if (defaultUser) {
+        setCurrentUser(defaultUser);
+        setCurrentRole('manager');
+      }
+      setIsAuthLoading(false);
+      return;
     }
 
-    if (isSupabaseConfigured) {
-      const loadSupabaseData = async () => {
-        const [orgsDb, facilitiesDb, vendorsDb, usersDb, requestsDb] = await Promise.all([
-          fetchOrganizations(),
-          fetchFacilities(),
-          fetchVendors(),
-          fetchUsers(),
-          fetchRequests()
-        ]);
+    // 1. Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) {
+        loadUserProfile(session.user.id).then(() => {
+          loadSupabaseData();
+        });
+      } else {
+        setIsAuthLoading(false);
+      }
+    });
 
-        if (orgsDb.length > 0) setOrganizations(orgsDb);
-        if (facilitiesDb.length > 0) setFacilities(facilitiesDb);
-        if (vendorsDb.length > 0) setVendors(vendorsDb);
-        if (usersDb.length > 0) {
-          setUsers(usersDb);
-          const matchedDefault = usersDb.find((u: User) => u.organizationId === 'org-4' && u.role === 'manager');
-          if (matchedDefault) {
-            setCurrentUser(matchedDefault);
-          }
+    // 2. Listen to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setSession(session);
+        if (session) {
+          await loadUserProfile(session.user.id);
+          await loadSupabaseData();
+        } else {
+          setCurrentUser(null);
+          setCurrentRole('tenant');
+          setIsAuthLoading(false);
         }
-        if (requestsDb.length > 0) setRequests(requestsDb);
-      };
+      }
+    );
 
-      loadSupabaseData();
-    }
+    const loadSupabaseData = async () => {
+      setIsAuthLoading(true);
+      const [orgsDb, facilitiesDb, vendorsDb, usersDb, requestsDb] = await Promise.all([
+        fetchOrganizations(),
+        fetchFacilities(),
+        fetchVendors(),
+        fetchUsers(),
+        fetchRequests()
+      ]);
+
+      if (orgsDb.length > 0) setOrganizations(orgsDb);
+      if (facilitiesDb.length > 0) setFacilities(facilitiesDb);
+      if (vendorsDb.length > 0) setVendors(vendorsDb);
+      if (usersDb.length > 0) setUsers(usersDb);
+      if (requestsDb.length > 0) setRequests(requestsDb);
+      setIsAuthLoading(false);
+    };
+
+    return () => subscription.unsubscribe();
   }, []);
 
   // Realtime Supabase Subscription for automatic UI updates
@@ -127,7 +184,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(requestsChannel);
     };
-  }, []);
+  }, [session]);
 
   // Sync dark mode class on document element
   useEffect(() => {
@@ -353,49 +410,80 @@ export default function App() {
   const visibleRequests = getVisibleRequests();
   const orgVendors = vendors.filter(v => v.organizationId === selectedOrgId);
 
+  if (isSupabaseConfigured && isAuthLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#090d16] text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+          <span className="text-xs font-semibold text-app-muted">Loading secure session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (isSupabaseConfigured && !session) {
+    return <AuthScreen onAuthSuccess={() => {}} />;
+  }
+
   return (
     <div className="app-container">
 
-      {/* Simulation Environment Control Bar */}
-      <div className="demo-bar">
-        <div className="demo-bar-title">
-          <Shield size={16} /> <span>Antigravity Multitenant Sandbox Environment</span>
+      {/* Production Auth Status Bar */}
+      {isSupabaseConfigured && (
+        <div className="demo-bar justify-between">
+          <div className="demo-bar-title">
+            <Shield size={16} className="text-emerald-500 animate-pulse" /> 
+            <span className="text-emerald-400 font-bold uppercase tracking-wider text-[10px]">Secure Supabase Auth Mode</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-app-muted pr-3">
+            <span>Org ID: <strong className="text-white">{selectedOrgId}</strong></span>
+            <span>Role: <strong className="text-white">{currentRole.toUpperCase()}</strong></span>
+          </div>
         </div>
-        <div className="demo-selectors">
-          <div className="demo-selector-group">
-            <span>Org:</span>
-            <select
-              className="demo-select"
-              value={selectedOrgId}
-              onChange={(e) => handleOrgChange(e.target.value)}
-            >
-              {organizations.map(org => (
-                <option key={org.id} value={org.id}>{org.name}</option>
-              ))}
-            </select>
-          </div>
+      )}
 
-          <div className="demo-selector-group">
-            <span>User Persona:</span>
-            <select
-              className="demo-select"
-              value={currentRole}
-              onChange={(e) => handleRoleChange(e.target.value as any)}
-            >
-              <option value="tenant">Resident / Tenant (QR Scanner)</option>
-              <option value="manager">Sarah/David (Facility Manager)</option>
-              <option value="vendor">John/Marcus (Contractor Vendor)</option>
-              <option value="admin">Alexander (Global SysAdmin)</option>
-            </select>
+      {/* Fallback Simulation Control Bar */}
+      {!isSupabaseConfigured && (
+        <div className="demo-bar">
+          <div className="demo-bar-title">
+            <Shield size={16} /> <span>Antigravity Multitenant Sandbox Environment</span>
           </div>
-
-          {currentUser && (
-            <div className="flex items-center gap-1 text-[11px] text-slate-300">
-              <UserCircle size={14} /> Signed in as: <strong>{currentUser.name}</strong>
+          <div className="demo-selectors">
+            <div className="demo-selector-group">
+              <span>Org:</span>
+              <select
+                className="demo-select"
+                value={selectedOrgId}
+                onChange={(e) => handleOrgChange(e.target.value)}
+              >
+                {organizations.map(org => (
+                  <option key={org.id} value={org.id}>{org.name}</option>
+                ))}
+              </select>
             </div>
-          )}
+
+            <div className="demo-selector-group">
+              <span>User Persona:</span>
+              <select
+                className="demo-select"
+                value={currentRole}
+                onChange={(e) => handleRoleChange(e.target.value as any)}
+              >
+                <option value="tenant">Resident / Tenant (QR Scanner)</option>
+                <option value="manager">Sarah/David (Facility Manager)</option>
+                <option value="vendor">John/Marcus (Contractor Vendor)</option>
+                <option value="admin">Alexander (Global SysAdmin)</option>
+              </select>
+            </div>
+
+            {currentUser && (
+              <div className="flex items-center gap-1 text-[11px] text-slate-300">
+                <UserCircle size={14} /> Signed in as: <strong>{currentUser.name}</strong>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Main Header */}
       <header className="header">
@@ -445,13 +533,21 @@ export default function App() {
           </button>
           <div className="user-badge">
             <div className="user-avatar" style={{ background: currentOrg?.themeColor || 'var(--primary)' }}>
-              {currentRole[0].toUpperCase()}
+              {currentUser?.name ? currentUser.name[0].toUpperCase() : 'U'}
             </div>
             <div className="hidden text-left md:block">
-              <div className="user-info-text">{currentRole}</div>
-              <div className="user-role-label">{currentOrg?.name}</div>
+              <div className="user-info-text">{currentUser?.name || 'User'}</div>
+              <div className="user-role-label">{currentUser?.role.toUpperCase()} • {currentOrg?.name}</div>
             </div>
           </div>
+          {isSupabaseConfigured && (
+            <button 
+              onClick={() => supabase.auth.signOut()}
+              className="cursor-pointer rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/10 active:scale-95 transition-all"
+            >
+              Sign Out
+            </button>
+          )}
         </div>
       </header>
 
