@@ -957,7 +957,7 @@ export default function App() {
 
   const getVisibleRequests = () => {
     if (currentRole === 'vendor' && currentUser?.vendorId) {
-      return requests.filter(r => r.organizationId === selectedOrgId && r.assignedVendorId === currentUser.vendorId);
+      return requests.filter(r => r.assignedVendorId === currentUser.vendorId);
     }
     return requests.filter(r => r.organizationId === selectedOrgId);
   };
