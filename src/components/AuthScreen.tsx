@@ -32,8 +32,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           return;
         }
         if (orgsData) {
-          setOrganizations(orgsData);
-          if (orgsData.length > 0) setOrgId(orgsData[0].id);
+          const mappedOrgs: Organization[] = orgsData.map(row => ({
+            id: row.id,
+            name: row.name,
+            logo: row.logo || undefined,
+            themeColor: row.theme_color
+          }));
+          setOrganizations(mappedOrgs);
+          if (mappedOrgs.length > 0) setOrgId(mappedOrgs[0].id);
         }
 
         const { data: vendorsData, error: vendorsError } = await supabase.from('vendors').select('*');
@@ -42,8 +48,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           return;
         }
         if (vendorsData) {
-          setVendors(vendorsData);
-          if (vendorsData.length > 0) setVendorId(vendorsData[0].id);
+          const mappedVendors: Vendor[] = vendorsData.map(row => ({
+            id: row.id,
+            organizationId: row.organization_id,
+            name: row.name,
+            specialty: row.specialty,
+            email: row.email,
+            phone: row.phone,
+            active: row.active ?? true
+          }));
+          setVendors(mappedVendors);
         }
       } catch (err: any) {
         console.error('Error fetching signup metadata:', err);
@@ -52,6 +66,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     };
     fetchMetadata();
   }, []);
+
+  // Keep vendorId in sync when orgId or vendors list changes
+  useEffect(() => {
+    const orgVendors = vendors.filter(v => v.organizationId === orgId);
+    if (orgVendors.length > 0) {
+      const exists = orgVendors.some(v => v.id === vendorId);
+      if (!exists) {
+        setVendorId(orgVendors[0].id);
+      }
+    } else {
+      setVendorId('');
+    }
+  }, [orgId, vendors, vendorId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
