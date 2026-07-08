@@ -11,10 +11,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [signUpType, setSignUpType] = useState<'organization' | 'vendor'>('organization');
-
-  // Organization registration state
-  const [newOrgName, setNewOrgName] = useState('');
+  const [signUpType, setSignUpType] = useState<'manager' | 'vendor'>('manager');
 
   // Vendor registration state
   const [vendorName, setVendorName] = useState('');
@@ -37,6 +34,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       }
     } else if (type === 'member') {
       setIsSignUp(true);
+      setSignUpType('manager');
       if (emailParam) {
         setEmail(emailParam);
       }
@@ -82,42 +80,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           return;
         }
 
-        if (signUpType === 'organization') {
-          if (!newOrgName.trim()) {
-            throw new Error('Organization name is required.');
-          }
+        if (signUpType === 'manager') {
+          // If we reached here, it means no memberInv was found
+          throw new Error('No pending manager or teammate invitation found for this email address. Please contact your Organization Administrator for an invitation.');
+        }
 
-          // 1. Create Organization
-          const generatedOrgId = `org-${Math.floor(Math.random() * 1000000)}`;
-          const { error: orgError } = await supabase.from('organizations').insert({
-            id: generatedOrgId,
-            name: newOrgName,
-            theme_color: '#4f46e5'
-          });
-          if (orgError) throw orgError;
-
-          // 2. Sign Up User as Org Admin
-          const { data, error: signUpError } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              data: {
-                name,
-                role: 'admin',
-                organization_id: generatedOrgId
-              }
-            }
-          });
-          if (signUpError) throw signUpError;
-
-          if (data.user && data.session === null) {
-            setError('Registration successful! Please check your email to verify your account.');
-          } else if (data.session) {
-            onAuthSuccess();
-          }
-        } else {
-          // Register as Vendor
-          let existingVendorId = '';
+        // Register as Vendor
+        let existingVendorId = '';
 
           // Check if a vendor profile was already created by a manager
           const { data: existingVendors, error: fetchErr } = await supabase
@@ -165,7 +134,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           } else if (data.session) {
             onAuthSuccess();
           }
-        }
       } else {
         // Sign In
         const { error: signInError } = await supabase.auth.signInWithPassword({
@@ -237,14 +205,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               <div className="grid grid-cols-2 gap-2 mt-1">
                 <button
                   type="button"
-                  onClick={() => setSignUpType('organization')}
+                  onClick={() => setSignUpType('manager')}
                   className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                    signUpType === 'organization'
+                    signUpType === 'manager'
                       ? 'border-indigo-500 bg-indigo-500/10 text-white font-extrabold'
                       : 'border-white/10 bg-white/5 text-app-muted hover:bg-white/10'
                   }`}
                 >
-                  <Building2 size={14} /> Organization
+                  <Building2 size={14} /> Organization Manager
                 </button>
                 <button
                   type="button"
@@ -316,26 +284,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               />
             </div>
           </div>
-
-          {isSignUp && signUpType === 'organization' && (
-            <div className="form-group">
-              <label className="form-label">Organization Name</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
-                  <Building2 size={16} />
-                </span>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Apex Property Management"
-                  className="form-input pl-9"
-                  style={{ paddingLeft: '2.5rem' }}
-                  value={newOrgName}
-                  onChange={(e) => setNewOrgName(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
 
           {isSignUp && signUpType === 'vendor' && (
             <>
