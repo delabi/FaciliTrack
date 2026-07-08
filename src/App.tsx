@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { getStoredData, saveRequestsToStore, saveFacilitiesToStore, saveVendorsToStore } from './utils/mockData';
+import { supabase, isSupabaseConfigured } from './utils/supabaseClient';
+import {
+  fetchOrganizations,
+  fetchFacilities,
+  fetchVendors,
+  fetchUsers,
+  fetchRequests
+} from './utils/supabaseSync';
 import { Organization, Facility, User, Vendor, RepairRequest } from './types';
 import { TenantReportForm } from './components/TenantReportForm';
 import { QrScannerView } from './components/QrScannerView';
@@ -7,8 +15,8 @@ import { QrCodeManager } from './components/QrCodeManager';
 import { DashboardStats } from './components/DashboardStats';
 import { RequestList } from './components/RequestList';
 import { RequestDetailsModal } from './components/RequestDetailsModal';
-import { 
-  Building, Wrench, Shield, Sun, Moon, LayoutDashboard, QrCode, PlusCircle, CheckCircle2, UserCircle, Phone, Mail 
+import {
+  Building, Wrench, Shield, Sun, Moon, LayoutDashboard, QrCode, PlusCircle, CheckCircle2, UserCircle, Phone, Mail
 } from 'lucide-react';
 
 export default function App() {
@@ -28,10 +36,10 @@ export default function App() {
   // App navigation state
   // 'dashboard' | 'scanner' | 'qr-manager' | 'vendor-mgmt'
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  
+
   // Specific facility for Tenant Reporting Form (triggered by scanning QR)
   const [activeReportFacility, setActiveReportFacility] = useState<Facility | null>(null);
-  
+
   // Selected request for details modal
   const [selectedRequest, setSelectedRequest] = useState<RepairRequest | null>(null);
 
@@ -57,13 +65,68 @@ export default function App() {
     setVendors(data.vendors);
     setUsers(data.users);
     setRequests(data.requests);
-    
+
     // Set default user as the manager of org-4
     const defaultUser = data.users.find((u: User) => u.organizationId === 'org-4' && u.role === 'manager');
     if (defaultUser) {
       setCurrentUser(defaultUser);
       setCurrentRole('manager');
     }
+
+    if (isSupabaseConfigured) {
+      const loadSupabaseData = async () => {
+        const [orgsDb, facilitiesDb, vendorsDb, usersDb, requestsDb] = await Promise.all([
+          fetchOrganizations(),
+          fetchFacilities(),
+          fetchVendors(),
+          fetchUsers(),
+          fetchRequests()
+        ]);
+
+        if (orgsDb.length > 0) setOrganizations(orgsDb);
+        if (facilitiesDb.length > 0) setFacilities(facilitiesDb);
+        if (vendorsDb.length > 0) setVendors(vendorsDb);
+        if (usersDb.length > 0) {
+          setUsers(usersDb);
+          const matchedDefault = usersDb.find((u: User) => u.organizationId === 'org-4' && u.role === 'manager');
+          if (matchedDefault) {
+            setCurrentUser(matchedDefault);
+          }
+        }
+        if (requestsDb.length > 0) setRequests(requestsDb);
+      };
+
+      loadSupabaseData();
+    }
+  }, []);
+
+  // Realtime Supabase Subscription for automatic UI updates
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    const requestsChannel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'repair_requests' },
+        async (payload) => {
+          console.log('Realtime DB change detected:', payload);
+          const freshRequests = await fetchRequests();
+          if (freshRequests.length > 0) {
+            setRequests(freshRequests);
+            setSelectedRequest(prev => {
+              if (!prev) return null;
+              const fresh = freshRequests.find(r => r.id === prev.id);
+              return fresh || prev;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(requestsChannel);
+    };
   }, []);
 
   // Sync dark mode class on document element
@@ -91,7 +154,7 @@ export default function App() {
         setCurrentUser(tenantUser);
         setActiveReportFacility(fac);
         setActiveTab('scanner');
-        
+
         // Clean URL to prevent loop
         window.history.replaceState({}, document.title, window.location.pathname);
       }
@@ -115,7 +178,7 @@ export default function App() {
         setCurrentUser(null);
       }
     }
-    
+
     // Clear selections
     setActiveReportFacility(null);
     setSelectedRequest(null);
@@ -124,7 +187,7 @@ export default function App() {
 
   const handleRoleChange = (role: 'manager' | 'vendor' | 'tenant' | 'admin') => {
     setCurrentRole(role);
-    
+
     if (role === 'tenant') {
       const tenantUser = users.find(u => u.organizationId === selectedOrgId && u.role === 'tenant') || null;
       setCurrentUser(tenantUser);
@@ -254,7 +317,7 @@ export default function App() {
       phone: newVenPhone,
       active: true
     };
-    
+
     // Create simulated user account for vendor to sign in
     const newVendorUser: User = {
       id: `usr-ven-${Math.floor(100 + Math.random() * 900)}`,
@@ -266,7 +329,7 @@ export default function App() {
     };
 
     handleAddVendor(newVendor);
-    
+
     const updatedUsers = [...users, newVendorUser];
     setUsers(updatedUsers);
     localStorage.setItem('fm_users', JSON.stringify(updatedUsers));
@@ -279,7 +342,7 @@ export default function App() {
   };
 
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
-  
+
   const getVisibleRequests = () => {
     if (currentRole === 'vendor' && currentUser?.vendorId) {
       return requests.filter(r => r.organizationId === selectedOrgId && r.assignedVendorId === currentUser.vendorId);
@@ -292,7 +355,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      
+
       {/* Simulation Environment Control Bar */}
       <div className="demo-bar">
         <div className="demo-bar-title">
@@ -301,9 +364,9 @@ export default function App() {
         <div className="demo-selectors">
           <div className="demo-selector-group">
             <span>Org:</span>
-            <select 
-              className="demo-select" 
-              value={selectedOrgId} 
+            <select
+              className="demo-select"
+              value={selectedOrgId}
               onChange={(e) => handleOrgChange(e.target.value)}
             >
               {organizations.map(org => (
@@ -314,7 +377,7 @@ export default function App() {
 
           <div className="demo-selector-group">
             <span>User Persona:</span>
-            <select 
+            <select
               className="demo-select"
               value={currentRole}
               onChange={(e) => handleRoleChange(e.target.value as any)}
@@ -345,25 +408,25 @@ export default function App() {
 
         {currentRole !== 'tenant' ? (
           <nav className="nav-menu">
-            <button 
+            <button
               className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
               onClick={() => { setActiveTab('dashboard'); setActiveReportFacility(null); }}
             >
               <LayoutDashboard size={16} /> Dashboard
             </button>
-            <button 
+            <button
               className={`nav-btn ${activeTab === 'scanner' ? 'active' : ''}`}
               onClick={() => { setActiveTab('scanner'); setActiveReportFacility(null); }}
             >
               <QrCode size={16} /> Scan QR Portal
             </button>
-            <button 
+            <button
               className={`nav-btn ${activeTab === 'qr-manager' ? 'active' : ''}`}
               onClick={() => { setActiveTab('qr-manager'); setActiveReportFacility(null); }}
             >
               <PlusCircle size={16} /> QR Flyer Codes
             </button>
-            <button 
+            <button
               className={`nav-btn ${activeTab === 'vendor-mgmt' ? 'active' : ''}`}
               onClick={() => { setActiveTab('vendor-mgmt'); setActiveReportFacility(null); }}
             >
@@ -394,7 +457,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="main-content">
-        
+
         {/* TENANT PORTAL - DIRECT MOBILE FIRST RESPONSIVE CONTAINER */}
         {currentRole === 'tenant' ? (
           <div className="mx-auto mb-10 w-full max-w-[600px] animate-[fadeIn_0.4s_ease]">
@@ -404,15 +467,15 @@ export default function App() {
                 Report leaks, AC system issues, or electrical hazards at Lehigh Companion Care homes.
               </p>
             </div>
-            
+
             {activeReportFacility ? (
-              <TenantReportForm 
-                facility={activeReportFacility} 
+              <TenantReportForm
+                facility={activeReportFacility}
                 onSubmitted={handleNewRequest}
                 onCancel={() => setActiveReportFacility(null)}
               />
             ) : (
-              <QrScannerView 
+              <QrScannerView
                 facilities={facilities}
                 organizations={organizations}
                 onScanSuccess={handleScanSuccess}
@@ -421,10 +484,10 @@ export default function App() {
             )}
           </div>
         ) : (
-          
+
           /* ADMINISTRATIVE VIEWS (MANAGER / VENDOR / SYSADMIN) */
           <div>
-            
+
             {/* View 1: DASHBOARD STATS & TICKET LISTING */}
             {activeTab === 'dashboard' && (
               <div>
@@ -436,7 +499,7 @@ export default function App() {
                     </p>
                   </div>
                   {currentRole === 'manager' && (
-                    <button 
+                    <button
                       className="glow-btn"
                       onClick={() => setActiveTab('qr-manager')}
                     >
@@ -446,7 +509,7 @@ export default function App() {
                 </div>
 
                 {/* Dashboard Metrics charts */}
-                <DashboardStats 
+                <DashboardStats
                   requests={visibleRequests}
                   selectedOrgId={selectedOrgId}
                   activeFilterStatus={statsFilterStatus}
@@ -465,7 +528,7 @@ export default function App() {
                       )}
                     </h2>
                   </div>
-                  <RequestList 
+                  <RequestList
                     requests={visibleRequests}
                     facilities={facilities}
                     selectedOrgId={selectedOrgId}
@@ -479,7 +542,7 @@ export default function App() {
             {/* View 2: SCAN QR PORTAL */}
             {activeTab === 'scanner' && (
               <div className="py-5">
-                <QrScannerView 
+                <QrScannerView
                   facilities={facilities}
                   organizations={organizations}
                   onScanSuccess={handleScanSuccess}
@@ -488,8 +551,8 @@ export default function App() {
 
                 {activeReportFacility && (
                   <div className="mx-auto mt-5 max-w-[480px]">
-                    <TenantReportForm 
-                      facility={activeReportFacility} 
+                    <TenantReportForm
+                      facility={activeReportFacility}
                       onSubmitted={handleNewRequest}
                       onCancel={() => setActiveReportFacility(null)}
                     />
@@ -500,7 +563,7 @@ export default function App() {
 
             {/* View 3: QR CODE MANAGER */}
             {activeTab === 'qr-manager' && (
-              <QrCodeManager 
+              <QrCodeManager
                 facilities={facilities}
                 organizations={organizations}
                 selectedOrgId={selectedOrgId}
@@ -658,8 +721,8 @@ export default function App() {
               <div className="flex-1 text-[13px] font-medium leading-normal">
                 {toast.message}
               </div>
-              <button 
-                className="ml-auto text-app-muted hover:text-app-text border-0 bg-transparent cursor-pointer p-1 px-1.5 text-[13px]" 
+              <button
+                className="ml-auto text-app-muted hover:text-app-text border-0 bg-transparent cursor-pointer p-1 px-1.5 text-[13px]"
                 onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
               >
                 ×
@@ -671,7 +734,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="border-t border-app-border bg-app-surface px-6 py-5 text-center text-xs text-app-muted">
-        FaciliTrack Multitenant Space &copy; 2026. Made with Google Antigravity.
+        FaciliTrack &copy; 2026.
       </footer>
 
     </div>

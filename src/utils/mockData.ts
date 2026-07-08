@@ -1,4 +1,6 @@
 import { Organization, Facility, User, Vendor, RepairRequest } from '../types';
+import { isSupabaseConfigured } from './supabaseClient';
+import { syncRequestToDb, syncFacilityToDb, syncVendorToDb } from './supabaseSync';
 
 // Simple SVG placeholders as data URIs for mock photos and documents
 export const MOCK_MEDIA = {
@@ -523,13 +525,53 @@ export const getStoredData = () => {
 };
 
 export const saveRequestsToStore = (requests: RepairRequest[]) => {
-  localStorage.setItem('fm_v3_requests', JSON.stringify(requests));
+  const prevRaw = localStorage.getItem('fm_v3_requests');
+  const prevRequests: RepairRequest[] = prevRaw ? JSON.parse(prevRaw) : [];
+  
+  try {
+    localStorage.setItem('fm_v3_requests', JSON.stringify(requests));
+  } catch (err) {
+    console.warn('Could not write requests to localStorage (likely quota exceeded due to large attachments):', err);
+  }
+
+  if (isSupabaseConfigured) {
+    requests.forEach(req => {
+      const prev = prevRequests.find(r => r.id === req.id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(req)) {
+        syncRequestToDb(req);
+      }
+    });
+  }
 };
 
 export const saveFacilitiesToStore = (facilities: Facility[]) => {
+  const prevRaw = localStorage.getItem('fm_v3_facilities');
+  const prevFacilities: Facility[] = prevRaw ? JSON.parse(prevRaw) : [];
+
   localStorage.setItem('fm_v3_facilities', JSON.stringify(facilities));
+
+  if (isSupabaseConfigured) {
+    facilities.forEach(fac => {
+      const prev = prevFacilities.find(f => f.id === fac.id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(fac)) {
+        syncFacilityToDb(fac);
+      }
+    });
+  }
 };
 
 export const saveVendorsToStore = (vendors: Vendor[]) => {
+  const prevRaw = localStorage.getItem('fm_v3_vendors');
+  const prevVendors: Vendor[] = prevRaw ? JSON.parse(prevRaw) : [];
+
   localStorage.setItem('fm_v3_vendors', JSON.stringify(vendors));
+
+  if (isSupabaseConfigured) {
+    vendors.forEach(ven => {
+      const prev = prevVendors.find(v => v.id === ven.id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(ven)) {
+        syncVendorToDb(ven);
+      }
+    });
+  }
 };

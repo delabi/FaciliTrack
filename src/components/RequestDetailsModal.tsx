@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RepairRequest, Facility, Vendor, User, RequestStatus } from '../types';
-import { X, Calendar, MapPin, Phone, Mail, User as UserIcon, Wrench, Shield, DollarSign, Upload, FileText, CheckCircle2 } from 'lucide-react';
+import { X, Calendar, MapPin, Phone, Mail, User as UserIcon, Wrench, Shield, DollarSign, Upload, FileText, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface RequestDetailsModalProps {
   request: RepairRequest;
@@ -30,6 +30,56 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
   const [inspectionNotes, setInspectionNotes] = useState(request.inspectionNotes || '');
   const [inspectionPhotos, setInspectionPhotos] = useState<string[]>(request.inspectionPhotoUrls || []);
   const [isInspectionUploading, setIsInspectionUploading] = useState(false);
+
+  // Media Viewer Carousel State
+  const [activeViewerMedia, setActiveViewerMedia] = useState<string[] | null>(null);
+  const [activeViewerIndex, setActiveViewerIndex] = useState<number>(0);
+
+  const isVideoUrl = (url: string) => {
+    return url.startsWith('data:video') || 
+           url.endsWith('.mp4') || 
+           url.endsWith('.webm') || 
+           url.endsWith('.ogg') ||
+           url.includes('video/');
+  };
+
+  const openMediaViewer = (mediaList: string[], startIndex: number) => {
+    setActiveViewerMedia(mediaList);
+    setActiveViewerIndex(startIndex);
+  };
+
+  const closeMediaViewer = () => {
+    setActiveViewerMedia(null);
+  };
+
+  const showPrevMedia = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeViewerMedia) return;
+    setActiveViewerIndex((prev) => (prev === 0 ? activeViewerMedia.length - 1 : prev - 1));
+  };
+
+  const showNextMedia = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeViewerMedia) return;
+    setActiveViewerIndex((prev) => (prev === activeViewerMedia.length - 1 ? 0 : prev + 1));
+  };
+
+  useEffect(() => {
+    if (!activeViewerMedia) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMediaViewer();
+      if (e.key === 'ArrowLeft') {
+        setActiveViewerIndex((prev) => (prev === 0 ? activeViewerMedia.length - 1 : prev - 1));
+      }
+      if (e.key === 'ArrowRight') {
+        setActiveViewerIndex((prev) => (prev === activeViewerMedia.length - 1 ? 0 : prev + 1));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeViewerMedia]);
 
   // Check roles
   const isManager = currentUser?.role === 'manager' || currentUser?.role === 'admin';
@@ -301,16 +351,25 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
               </h4>
               <div className="media-container">
                 {request.mediaUrls.map((url, idx) => {
-                  const isVideo = url.startsWith('data:video');
+                  const isVideo = isVideoUrl(url);
                   return isVideo ? (
-                    <video key={idx} src={url} controls className="media-item" />
+                    <div 
+                      key={idx} 
+                      className="relative group cursor-pointer media-item flex items-center justify-center bg-black/20"
+                      onClick={() => openMediaViewer(request.mediaUrls, idx)}
+                    >
+                      <video src={url} className="h-full w-full object-cover pointer-events-none" />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 rounded-lg transition-colors">
+                        <span className="text-white text-[10px] font-bold bg-black/60 px-2 py-1 rounded">Play Video</span>
+                      </div>
+                    </div>
                   ) : (
                     <img
                       key={idx}
                       src={url}
                       alt={`attachment-${idx}`}
-                      className="media-item"
-                      onClick={() => window.open(url, '_blank')}
+                      className="media-item cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => openMediaViewer(request.mediaUrls, idx)}
                     />
                   );
                 })}
@@ -393,28 +452,35 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
                 <CheckCircle2 size={16} /> Completed Work Proofs
               </h4>
               <div className="media-container">
-                {request.completionPhotoUrl && (
-                  <div>
-                    <span className="mb-1 block text-[11px] text-app-muted">Completion Photo:</span>
-                    <img
-                      src={request.completionPhotoUrl}
-                      alt="Completed Work"
-                      className="media-item h-[120px] w-40"
-                      onClick={() => window.open(request.completionPhotoUrl, '_blank')}
-                    />
-                  </div>
-                )}
-                {request.receiptUrl && (
-                  <div>
-                    <span className="mb-1 block text-[11px] text-app-muted">Invoice/Receipt Document:</span>
-                    <img
-                      src={request.receiptUrl}
-                      alt="Invoice Receipt"
-                      className="media-item h-[120px] w-40"
-                      onClick={() => window.open(request.receiptUrl, '_blank')}
-                    />
-                  </div>
-                )}
+                {(() => {
+                  const completedProofs = [request.completionPhotoUrl, request.receiptUrl].filter(Boolean) as string[];
+                  return (
+                    <>
+                       {request.completionPhotoUrl && (
+                        <div>
+                          <span className="mb-1 block text-[11px] text-app-muted">Completion Photo:</span>
+                          <img
+                            src={request.completionPhotoUrl}
+                            alt="Completed Work"
+                            className="media-item h-[120px] w-40 cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => openMediaViewer(completedProofs, completedProofs.indexOf(request.completionPhotoUrl!))}
+                          />
+                        </div>
+                      )}
+                      {request.receiptUrl && (
+                        <div>
+                          <span className="mb-1 block text-[11px] text-app-muted">Invoice/Receipt Document:</span>
+                          <img
+                            src={request.receiptUrl}
+                            alt="Invoice Receipt"
+                            className="media-item h-[120px] w-40 cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => openMediaViewer(completedProofs, completedProofs.indexOf(request.receiptUrl!))}
+                          />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -442,16 +508,25 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
                   <span className="mb-1 block text-[11px] text-app-muted">Evidential Inspection Media:</span>
                   <div className="media-container">
                     {request.inspectionPhotoUrls.map((url, idx) => {
-                      const isVideo = url.startsWith('data:video');
+                       const isVideo = isVideoUrl(url);
                       return isVideo ? (
-                        <video key={idx} src={url} controls className="media-item h-[120px] w-40" />
+                        <div 
+                          key={idx} 
+                          className="relative group cursor-pointer media-item h-[120px] w-40 flex items-center justify-center bg-black/20"
+                          onClick={() => openMediaViewer(request.inspectionPhotoUrls!, idx)}
+                        >
+                          <video src={url} className="h-full w-full object-cover pointer-events-none" />
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 rounded-lg transition-colors">
+                            <span className="text-white text-[10px] font-bold bg-black/60 px-1.5 py-0.5 rounded">Play Video</span>
+                          </div>
+                        </div>
                       ) : (
                         <img
                           key={idx}
                           src={url}
                           alt={`inspection-proof-${idx}`}
-                          className="media-item h-[120px] w-40"
-                          onClick={() => window.open(url, '_blank')}
+                          className="media-item h-[120px] w-40 cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => openMediaViewer(request.inspectionPhotoUrls!, idx)}
                         />
                       );
                     })}
@@ -797,6 +872,89 @@ export const RequestDetailsModal: React.FC<RequestDetailsModalProps> = ({
         </div>
 
       </div>
+
+      {/* Media Viewer Carousel Modal */}
+      {activeViewerMedia && activeViewerMedia.length > 0 && (
+        <div 
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/95 backdrop-blur-md animate-[fadeIn_0.2s_ease-out]"
+          onClick={closeMediaViewer}
+        >
+          {/* Close button */}
+          <button 
+            className="absolute top-5 right-5 cursor-pointer rounded-full bg-white/10 p-2.5 text-white hover:bg-white/20 hover:scale-105 active:scale-95 transition-all duration-300 z-10"
+            onClick={closeMediaViewer}
+          >
+            <X size={24} />
+          </button>
+
+          {/* Carousel container */}
+          <div className="relative flex h-[80vh] w-full max-w-5xl items-center justify-center px-12">
+            {/* Left navigation */}
+            {activeViewerMedia.length > 1 && (
+              <button 
+                className="absolute left-4 cursor-pointer rounded-full bg-white/10 p-3 text-white hover:bg-white/20 hover:scale-105 active:scale-95 transition-all duration-300"
+                onClick={showPrevMedia}
+              >
+                <ChevronLeft size={28} />
+              </button>
+            )}
+
+            {/* Active media container */}
+            <div 
+              className="flex h-full w-full items-center justify-center p-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isVideoUrl(activeViewerMedia[activeViewerIndex]) ? (
+                <video 
+                  src={activeViewerMedia[activeViewerIndex]} 
+                  controls 
+                  autoPlay
+                  className="max-h-full max-w-full rounded-lg shadow-2xl border border-white/10"
+                />
+              ) : (
+                <img 
+                  src={activeViewerMedia[activeViewerIndex]} 
+                  alt={`viewer-media-${activeViewerIndex}`} 
+                  className="max-h-full max-w-full object-contain rounded-lg shadow-2xl border border-white/10 select-none animate-[zoomIn_0.2s_ease-out]"
+                />
+              )}
+            </div>
+
+            {/* Right navigation */}
+            {activeViewerMedia.length > 1 && (
+              <button 
+                className="absolute right-4 cursor-pointer rounded-full bg-white/10 p-3 text-white hover:bg-white/20 hover:scale-105 active:scale-95 transition-all duration-300"
+                onClick={showNextMedia}
+              >
+                <ChevronRight size={28} />
+              </button>
+            )}
+          </div>
+
+          {/* Indicator/Thumbnails */}
+          {activeViewerMedia.length > 1 && (
+            <div 
+              className="mt-4 flex items-center gap-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {activeViewerMedia.map((_, idx) => (
+                <button 
+                  key={idx}
+                  onClick={() => setActiveViewerIndex(idx)}
+                  className={`h-2.5 rounded-full transition-all duration-300 cursor-pointer ${
+                    idx === activeViewerIndex ? 'w-8 bg-app-primary' : 'w-2.5 bg-white/30 hover:bg-white/50'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Media Info (index/total) */}
+          <div className="mt-2 text-xs font-semibold text-white/50">
+            {activeViewerIndex + 1} of {activeViewerMedia.length}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
