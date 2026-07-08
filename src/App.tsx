@@ -628,6 +628,7 @@ export default function App() {
 
   // Dashboard filter state (from clicking metric cards)
   const [statsFilterStatus, setStatsFilterStatus] = useState<string>('all');
+  const [vendorOrgFilter, setVendorOrgFilter] = useState<string>('all');
 
   // Toasts notification state
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'warning' }[]>([]);
@@ -957,7 +958,11 @@ export default function App() {
 
   const getVisibleRequests = () => {
     if (currentRole === 'vendor' && currentUser?.vendorId) {
-      return requests.filter(r => r.assignedVendorId === currentUser.vendorId);
+      let list = requests.filter(r => r.assignedVendorId === currentUser.vendorId);
+      if (vendorOrgFilter !== 'all') {
+        list = list.filter(r => r.organizationId === vendorOrgFilter);
+      }
+      return list;
     }
     return requests.filter(r => r.organizationId === selectedOrgId);
   };
@@ -1770,9 +1775,13 @@ export default function App() {
                   <RequestList
                     requests={visibleRequests}
                     facilities={facilities}
+                    organizations={organizations}
                     selectedOrgId={selectedOrgId}
                     activeFilterStatus={statsFilterStatus}
                     onRequestClick={(req) => setSelectedRequest(req)}
+                    isVendorView={true}
+                    selectedOrgFilter={vendorOrgFilter}
+                    onOrgFilterChange={setVendorOrgFilter}
                   />
                 </div>
               </div>

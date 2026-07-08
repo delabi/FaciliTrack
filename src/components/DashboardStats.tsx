@@ -15,7 +15,7 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
   activeFilterStatus,
   onFilterStatusChange
 }) => {
-  const orgRequests = requests.filter((r) => r.organizationId === selectedOrgId);
+  const orgRequests = requests;
 
   // Status Counts
   const total = orgRequests.length;

@@ -1,21 +1,29 @@
 import React, { useState } from 'react';
-import { RepairRequest, Facility } from '../types';
+import { RepairRequest, Facility, Organization } from '../types';
 import { Search, MapPin, Calendar, Wrench, Image, Video, CheckCircle2 } from 'lucide-react';
 
 interface RequestListProps {
   requests: RepairRequest[];
   facilities: Facility[];
+  organizations?: Organization[];
   selectedOrgId: string;
   activeFilterStatus: string; // 'all', 'pending', 'active', 'completed', 'paid'
   onRequestClick: (request: RepairRequest) => void;
+  isVendorView?: boolean;
+  selectedOrgFilter?: string;
+  onOrgFilterChange?: (orgId: string) => void;
 }
 
 export const RequestList: React.FC<RequestListProps> = ({
   requests,
   facilities,
+  organizations = [],
   selectedOrgId,
   activeFilterStatus,
-  onRequestClick
+  onRequestClick,
+  isVendorView = false,
+  selectedOrgFilter = 'all',
+  onOrgFilterChange
 }) => {
   const [search, setSearch] = useState('');
   const [selectedFacilityId, setSelectedFacilityId] = useState('all');
@@ -26,7 +34,11 @@ export const RequestList: React.FC<RequestListProps> = ({
   // Filter requests
   const filteredRequests = requests.filter((req) => {
     // Org Filter
-    if (req.organizationId !== selectedOrgId) return false;
+    if (isVendorView) {
+      if (selectedOrgFilter !== 'all' && req.organizationId !== selectedOrgFilter) return false;
+    } else {
+      if (req.organizationId !== selectedOrgId) return false;
+    }
 
     // Status Filter (from metric cards)
     if (activeFilterStatus === 'pending' && req.status !== 'pending') return false;
@@ -100,6 +112,22 @@ export const RequestList: React.FC<RequestListProps> = ({
             />
           </div>
 
+          {isVendorView && (
+            <select
+              className="filter-select"
+              value={selectedOrgFilter}
+              onChange={(e) => {
+                if (onOrgFilterChange) onOrgFilterChange(e.target.value);
+                setSelectedFacilityId('all');
+              }}
+            >
+              <option value="all">All Client Organizations</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>{org.name}</option>
+              ))}
+            </select>
+          )}
+
           <select
             className="filter-select"
             value={selectedFacilityId}
@@ -107,7 +135,7 @@ export const RequestList: React.FC<RequestListProps> = ({
           >
             <option value="all">All Facilities</option>
             {facilities
-              .filter((f) => f.organizationId === selectedOrgId)
+              .filter((f) => isVendorView ? (selectedOrgFilter === 'all' || f.organizationId === selectedOrgFilter) : f.organizationId === selectedOrgId)
               .map((f) => (
                 <option key={f.id} value={f.id}>{f.name}</option>
               ))}
