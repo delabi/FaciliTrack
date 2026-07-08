@@ -205,9 +205,16 @@ export async function syncRequestToDb(request: RepairRequest) {
       (request.inspectionPhotoUrls || []).map((url, i) => uploadBase64ToStorage(url, `requests/${request.id}-inspection-${i}`))
     );
 
-    // 2. Upsert Request Row
-    const { error: reqError } = await supabase.from('repair_requests').upsert({
-      id: request.id,
+    // 2. Insert or Update Request Row
+    const { data: existing, error: existError } = await supabase
+      .from('repair_requests')
+      .select('id')
+      .eq('id', request.id)
+      .maybeSingle();
+
+    if (existError) throw existError;
+
+    const requestData = {
       organization_id: request.organizationId,
       facility_id: request.facilityId,
       title: request.title,
@@ -231,7 +238,21 @@ export async function syncRequestToDb(request: RepairRequest) {
       inspection_notes: request.inspectionNotes,
       inspection_approved: request.inspectionApproved,
       created_at: request.createdAt
-    });
+    };
+
+    let reqError;
+    if (existing) {
+      const { error } = await supabase
+        .from('repair_requests')
+        .update(requestData)
+        .eq('id', request.id);
+      reqError = error;
+    } else {
+      const { error } = await supabase
+        .from('repair_requests')
+        .insert({ id: request.id, ...requestData });
+      reqError = error;
+    }
 
     if (reqError) throw reqError;
 
