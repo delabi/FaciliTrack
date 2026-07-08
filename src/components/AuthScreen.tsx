@@ -177,7 +177,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       }
     } catch (err: any) {
       console.error('Auth error:', err);
-      setError(err.message || 'An error occurred during authentication.');
+      let errorMsg = 'An error occurred during authentication.';
+      if (err) {
+        if (typeof err === 'string') {
+          errorMsg = err;
+        } else if (err.message && typeof err.message === 'string') {
+          errorMsg = err.message;
+        } else if (err.error_description && typeof err.error_description === 'string') {
+          errorMsg = err.error_description;
+        } else if (err.error && typeof err.error === 'string') {
+          errorMsg = err.error;
+        } else {
+          try {
+            errorMsg = err.toString() || errorMsg;
+          } catch (e) {}
+        }
+      }
+      if (errorMsg === '{}' || errorMsg === '[object Object]' || !errorMsg.trim()) {
+        errorMsg = 'An error occurred. Please verify your connection or email rate limits.';
+      }
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

@@ -212,7 +212,12 @@ export default function App() {
           });
           if (fnError) {
             console.warn('Edge function failed:', fnError);
-            addToast('Mailer unavailable. Please copy the registration link manually.', 'info');
+            let errorMsg = fnError.message;
+            try {
+              const errBody = await fnError.context.json();
+              if (errBody && errBody.error) errorMsg = errBody.error;
+            } catch (e) {}
+            addToast(`Mailer notice: ${errorMsg}. Copy link manually.`, 'warning');
           } else {
             addToast('Vendor invitation email dispatched!', 'success');
           }
@@ -283,7 +288,12 @@ export default function App() {
         });
         if (fnError) {
           console.warn('Edge function failed:', fnError);
-          addToast('Mailer unavailable. Please copy invitation link manually.', 'info');
+          let errorMsg = fnError.message;
+          try {
+            const errBody = await fnError.context.json();
+            if (errBody && errBody.error) errorMsg = errBody.error;
+          } catch (e) {}
+          addToast(`Mailer notice: ${errorMsg}. Copy link manually.`, 'warning');
         } else {
           addToast('Organization created & Admin invitation email dispatched!', 'success');
         }
@@ -336,7 +346,12 @@ export default function App() {
         });
         if (fnError) {
           console.warn('Edge function failed:', fnError);
-          addToast('Mailer unavailable. Fallback copy link generated.', 'info');
+          let errorMsg = fnError.message;
+          try {
+            const errBody = await fnError.context.json();
+            if (errBody && errBody.error) errorMsg = errBody.error;
+          } catch (e) {}
+          addToast(`Mailer notice: ${errorMsg}. Copy link manually.`, 'warning');
         } else {
           addToast('Manager invitation email dispatched!', 'success');
         }
