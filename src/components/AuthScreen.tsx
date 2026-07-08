@@ -24,20 +24,30 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   // Load organizations and vendors list for sign-up dropdowns
   useEffect(() => {
     const fetchMetadata = async () => {
+      setError(null);
       try {
-        const { data: orgsData } = await supabase.from('organizations').select('*');
+        const { data: orgsData, error: orgsError } = await supabase.from('organizations').select('*');
+        if (orgsError) {
+          setError(`Failed to load organizations: ${orgsError.message}`);
+          return;
+        }
         if (orgsData) {
           setOrganizations(orgsData);
           if (orgsData.length > 0) setOrgId(orgsData[0].id);
         }
 
-        const { data: vendorsData } = await supabase.from('vendors').select('*');
+        const { data: vendorsData, error: vendorsError } = await supabase.from('vendors').select('*');
+        if (vendorsError) {
+          setError(`Failed to load vendors: ${vendorsError.message}`);
+          return;
+        }
         if (vendorsData) {
           setVendors(vendorsData);
           if (vendorsData.length > 0) setVendorId(vendorsData[0].id);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching signup metadata:', err);
+        setError(err.message || 'Error loading initialization metadata.');
       }
     };
     fetchMetadata();
@@ -82,7 +92,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         onAuthSuccess();
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred during authentication.');
+      console.error('Auth error:', err);
+      let message = 'An error occurred during authentication.';
+      if (err) {
+        if (typeof err === 'string') {
+          message = err;
+        } else if (err.message && err.message !== '{}') {
+          message = err.message;
+        } else if (err.error_description) {
+          message = err.error_description;
+        } else {
+          try {
+            const str = JSON.stringify(err);
+            if (str !== '{}') message = str;
+          } catch (_) {}
+        }
+      }
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -130,6 +156,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   required
                   placeholder="e.g. John Doe"
                   className="form-input pl-9"
+                  style={{ paddingLeft: '2.5rem' }}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
@@ -148,6 +175,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 required
                 placeholder="e.g. name@company.com"
                 className="form-input pl-9"
+                style={{ paddingLeft: '2.5rem' }}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
@@ -165,6 +193,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 required
                 placeholder="••••••••"
                 className="form-input pl-9"
+                style={{ paddingLeft: '2.5rem' }}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -194,6 +223,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   </span>
                   <select
                     className="form-input pl-9"
+                    style={{ paddingLeft: '2.5rem' }}
                     value={orgId}
                     onChange={(e) => setOrgId(e.target.value)}
                   >
@@ -213,6 +243,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     </span>
                     <select
                       className="form-input pl-9"
+                      style={{ paddingLeft: '2.5rem' }}
                       value={vendorId}
                       onChange={(e) => setVendorId(e.target.value)}
                     >
