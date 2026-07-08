@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { RepairRequest, ProgressLog, Facility, Vendor, Organization, User } from '../types';
+import { RepairRequest, ProgressLog, Facility, Vendor, Organization, User, VendorAffiliation, VendorInvitation } from '../types';
 
 // Convert base64 data URL to Blob for storage upload
 async function base64ToBlob(base64DataUrl: string): Promise<Blob> {
@@ -286,4 +286,58 @@ export async function syncVendorToDb(vendor: Vendor) {
   if (error) {
     console.error(`Error syncing vendor ${vendor.id} to Supabase:`, error);
   }
+}
+
+export async function fetchVendorAffiliations(): Promise<VendorAffiliation[]> {
+  if (!isSupabaseConfigured) return [];
+  const { data, error } = await supabase.from('vendor_affiliations').select('*');
+  if (error) {
+    console.error('Error fetching affiliations:', error);
+    return [];
+  }
+  return (data || []).map(row => ({
+    vendorId: row.vendor_id,
+    organizationId: row.organization_id,
+    createdAt: row.created_at
+  }));
+}
+
+export async function fetchVendorInvitations(): Promise<VendorInvitation[]> {
+  if (!isSupabaseConfigured) return [];
+  const { data, error } = await supabase.from('vendor_invitations').select('*');
+  if (error) {
+    console.error('Error fetching invitations:', error);
+    return [];
+  }
+  return (data || []).map(row => ({
+    id: row.id,
+    organizationId: row.organization_id,
+    email: row.email,
+    status: row.status,
+    createdAt: row.created_at
+  }));
+}
+
+export interface MemberInvitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: 'manager' | 'vendor' | 'tenant';
+  createdAt?: string;
+}
+
+export async function fetchMemberInvitations(): Promise<MemberInvitation[]> {
+  if (!isSupabaseConfigured) return [];
+  const { data, error } = await supabase.from('member_invitations').select('*');
+  if (error) {
+    console.error('Error fetching member invitations:', error);
+    return [];
+  }
+  return (data || []).map(row => ({
+    id: row.id,
+    organizationId: row.organization_id,
+    email: row.email,
+    role: row.role,
+    createdAt: row.created_at
+  }));
 }

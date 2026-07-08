@@ -6,9 +6,13 @@ import {
   fetchFacilities,
   fetchVendors,
   fetchUsers,
-  fetchRequests
+  fetchRequests,
+  fetchVendorAffiliations,
+  fetchVendorInvitations,
+  fetchMemberInvitations,
+  MemberInvitation
 } from './utils/supabaseSync';
-import { Organization, Facility, User, Vendor, RepairRequest } from './types';
+import { Organization, Facility, User, Vendor, RepairRequest, VendorAffiliation, VendorInvitation } from './types';
 import { TenantReportForm } from './components/TenantReportForm';
 import { AuthScreen } from './components/AuthScreen';
 import { QrScannerView } from './components/QrScannerView';
@@ -17,10 +21,478 @@ import { DashboardStats } from './components/DashboardStats';
 import { RequestList } from './components/RequestList';
 import { RequestDetailsModal } from './components/RequestDetailsModal';
 import {
-  Building, Wrench, Shield, Sun, Moon, LayoutDashboard, QrCode, PlusCircle, CheckCircle2, UserCircle, Phone, Mail
+  Building, Wrench, Shield, Sun, Moon, LayoutDashboard, QrCode, PlusCircle, CheckCircle2, UserCircle, Phone, Mail, Clock
 } from 'lucide-react';
 
 export default function App() {
+  // Platform invitation and affiliation states
+  const [vendorAffiliations, setVendorAffiliations] = useState<VendorAffiliation[]>([]);
+  const [vendorInvitations, setVendorInvitations] = useState<VendorInvitation[]>([]);
+  const [memberInvitations, setMemberInvitations] = useState<MemberInvitation[]>([]);
+
+  // Local state for platform administration forms
+  const [newOrgNameAdmin, setNewOrgNameAdmin] = useState('');
+  const [newOrgColor, setNewOrgColor] = useState('#4f46e5');
+  const [newManagerEmail, setNewManagerEmail] = useState('');
+  const [vendorSearchQuery, setVendorSearchQuery] = useState('');
+  const [newFacilityName, setNewFacilityName] = useState('');
+  const [newFacilityAddress, setNewFacilityAddress] = useState('');
+  const [newFacilityDesc, setNewFacilityDesc] = useState('');
+
+  const [newVenName, setNewVenName] = useState('');
+  const [newVenSpecialty, setNewVenSpecialty] = useState('');
+  const [newVenEmail, setNewVenEmail] = useState('');
+  const [newVenPhone, setNewVenPhone] = useState('');
+  const [activeInviteLink, setActiveInviteLink] = useState<string | null>(null);
+
+  // States for SuperAdmin user profiles editor
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserRole, setEditUserRole] = useState<'superadmin' | 'admin' | 'manager' | 'vendor'>('manager');
+  const [editUserOrgId, setEditUserOrgId] = useState<string>('');
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  const handleDeleteOrg = async (orgId: string) => {
+    if (!confirm("Are you sure you want to delete this organization? This will permanently delete all associated facilities, requests, and contractor affiliations.")) return;
+
+    if (isSupabaseConfigured) {
+      const { error: reqErr } = await supabase.from('repair_requests').delete().eq('organization_id', orgId);
+      const { error: facErr } = await supabase.from('facilities').delete().eq('organization_id', orgId);
+      const { error: affErr } = await supabase.from('vendor_affiliations').delete().eq('organization_id', orgId);
+      const { error: invErr } = await supabase.from('vendor_invitations').delete().eq('organization_id', orgId);
+      const { error: memErr } = await supabase.from('member_invitations').delete().eq('organization_id', orgId);
+
+      const { error } = await supabase.from('organizations').delete().eq('id', orgId);
+      if (error) {
+        addToast(`Error deleting organization: ${error.message}`, 'warning');
+      } else {
+        addToast('Organization deleted successfully!', 'success');
+        setOrganizations(prev => prev.filter(o => o.id !== orgId));
+      }
+    } else {
+      const stored = getStoredData();
+      const updatedOrgs = stored.orgs.filter((o: any) => o.id !== orgId);
+      const updatedFacs = stored.facilities.filter((f: any) => f.organizationId !== orgId);
+      const updatedReqs = stored.requests.filter((r: any) => r.organizationId !== orgId);
+      
+      localStorage.setItem('fm_v3_orgs', JSON.stringify(updatedOrgs));
+      localStorage.setItem('fm_v3_facilities', JSON.stringify(updatedFacs));
+      localStorage.setItem('fm_v3_requests', JSON.stringify(updatedReqs));
+      
+      setOrganizations(updatedOrgs);
+      setFacilities(updatedFacs);
+      setRequests(updatedReqs);
+      addToast('Organization deleted locally!', 'success');
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm("Are you sure you want to delete this user account completely?")) return;
+    
+    if (isSupabaseConfigured) {
+      try {
+        const { error: fnError } = await supabase.functions.invoke('send-invite', {
+          body: {
+            action: 'delete-user',
+            userId
+          }
+        });
+
+        if (fnError) {
+          addToast(`Failed to delete account: ${fnError.message}`, 'warning');
+          return;
+        }
+        
+        addToast('User account deleted successfully!', 'success');
+        setUsers(prev => prev.filter(u => u.id !== userId));
+      } catch (err) {
+        addToast('Error communicating with accounts service.', 'warning');
+      }
+    } else {
+      const stored = getStoredData();
+      const updatedUsers = stored.users.filter((u: any) => u.id !== userId);
+      localStorage.setItem('fm_v3_users', JSON.stringify(updatedUsers));
+      setUsers(updatedUsers);
+      addToast('User deleted locally!', 'success');
+    }
+  };
+
+  const handleUpdateUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    if (isSupabaseConfigured) {
+      try {
+        const { error: fnError } = await supabase.functions.invoke('send-invite', {
+          body: {
+            action: 'update-user',
+            userId: editingUser.id,
+            name: editUserName,
+            role: editUserRole,
+            orgId: editUserOrgId || null
+          }
+        });
+
+        if (fnError) {
+          addToast(`Failed to update account: ${fnError.message}`, 'warning');
+          return;
+        }
+
+        addToast('User profile updated successfully!', 'success');
+        const freshUsers = await fetchUsers();
+        setUsers(freshUsers);
+        setEditingUser(null);
+      } catch (err) {
+        addToast('Error communicating with accounts service.', 'warning');
+      }
+    } else {
+      const stored = getStoredData();
+      const updatedUsers = stored.users.map((u: any) => 
+        u.id === editingUser.id 
+          ? { ...u, name: editUserName, role: editUserRole, organizationId: editUserOrgId || null } 
+          : u
+      );
+      localStorage.setItem('fm_v3_users', JSON.stringify(updatedUsers));
+      setUsers(updatedUsers);
+      setEditingUser(null);
+      addToast('User updated locally!', 'success');
+    }
+  };
+
+  const handleVendorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newVenName.trim() || !newVenSpecialty.trim()) return;
+    const newId = `ven-${Math.floor(100 + Math.random() * 900)}`;
+    const newVendor: Vendor = {
+      id: newId,
+      organizationId: selectedOrgId,
+      name: newVenName,
+      specialty: newVenSpecialty,
+      email: newVenEmail,
+      phone: newVenPhone,
+      active: true
+    };
+
+    if (isSupabaseConfigured) {
+      const { error: venError } = await supabase.from('vendors').insert({
+        id: newId,
+        organization_id: selectedOrgId,
+        name: newVenName,
+        specialty: newVenSpecialty,
+        email: newVenEmail,
+        phone: newVenPhone,
+        active: true
+      });
+      if (venError) {
+        addToast(`Error saving vendor: ${venError.message}`, 'warning');
+        return;
+      }
+      
+      await supabase.from('vendor_affiliations').insert({
+        vendor_id: newId,
+        organization_id: selectedOrgId
+      });
+
+      addToast('Vendor profile onboarded and affiliated!', 'success');
+
+      // Dispatch actual email invite via Supabase Edge Function
+      if (newVenEmail.trim()) {
+        try {
+          const { error: fnError } = await supabase.functions.invoke('send-invite', {
+            body: {
+              email: newVenEmail.trim(),
+              role: 'vendor',
+              orgId: selectedOrgId,
+              vendorId: newId
+            }
+          });
+          if (fnError) {
+            console.warn('Edge function failed:', fnError);
+            addToast('Mailer unavailable. Please copy the registration link manually.', 'info');
+          } else {
+            addToast('Vendor invitation email dispatched!', 'success');
+          }
+        } catch (err) {
+          console.warn('Edge function error:', err);
+          addToast('Could not reach invite service. Fallback link generated.', 'info');
+        }
+      }
+
+      const [freshVendors, freshAffils] = await Promise.all([
+        fetchVendors(),
+        fetchVendorAffiliations()
+      ]);
+      setVendors(freshVendors);
+      setVendorAffiliations(freshAffils);
+    } else {
+      handleAddVendor(newVendor);
+      addToast('Vendor profile added locally!', 'success');
+    }
+
+    if (newVenEmail.trim()) {
+      const inviteLink = `${window.location.origin}/signup?inviteType=vendor&email=${encodeURIComponent(newVenEmail.trim())}`;
+      setActiveInviteLink(inviteLink);
+    }
+
+    setNewVenName('');
+    setNewVenSpecialty('');
+    setNewVenEmail('');
+    setNewVenPhone('');
+  };
+
+  // SuperAdmin: Create Organization
+  const handleCreateOrgAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOrgNameAdmin.trim()) return;
+    const generatedOrgId = `org-${Math.floor(Math.random() * 1000000)}`;
+    const { error } = await supabase.from('organizations').insert({
+      id: generatedOrgId,
+      name: newOrgNameAdmin,
+      theme_color: newOrgColor
+    });
+    if (error) {
+      addToast(`Error: ${error.message}`, 'warning');
+    } else {
+      addToast('Organization created successfully!', 'success');
+      setNewOrgNameAdmin('');
+      const freshOrgs = await fetchOrganizations();
+      setOrganizations(freshOrgs);
+    }
+  };
+
+  // OrgAdmin: Invite Manager
+  const handleInviteManager = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newManagerEmail.trim()) return;
+
+    if (isSupabaseConfigured) {
+      try {
+        const { error: fnError } = await supabase.functions.invoke('send-invite', {
+          body: {
+            email: newManagerEmail.trim(),
+            role: 'manager',
+            orgId: selectedOrgId
+          }
+        });
+        if (fnError) {
+          console.warn('Edge function failed:', fnError);
+          addToast('Mailer unavailable. Fallback copy link generated.', 'info');
+        } else {
+          addToast('Manager invitation email dispatched!', 'success');
+        }
+      } catch (err) {
+        console.warn('Edge function error:', err);
+        addToast('Could not reach invite service. Fallback link generated.', 'info');
+      }
+    }
+
+    const { error } = await supabase.from('member_invitations').insert({
+      organization_id: selectedOrgId,
+      email: newManagerEmail.trim(),
+      role: 'manager'
+    });
+    if (error) {
+      addToast(`Error tracking invite: ${error.message}`, 'warning');
+    } else {
+      const inviteLink = `${window.location.origin}/signup?inviteType=member&email=${encodeURIComponent(newManagerEmail.trim())}`;
+      setActiveInviteLink(inviteLink);
+      setNewManagerEmail('');
+      const freshInvites = await fetchMemberInvitations();
+      setMemberInvitations(freshInvites);
+    }
+  };
+
+  // OrgAdmin: Invite Vendor to affiliate
+  const handleInviteVendor = async (vendorEmail: string) => {
+    const { error } = await supabase.from('vendor_invitations').insert({
+      organization_id: selectedOrgId,
+      email: vendorEmail,
+      status: 'pending'
+    });
+    if (error) {
+      addToast(`Error: ${error.message}`, 'warning');
+    } else {
+      addToast('Affiliation invitation sent to vendor!', 'success');
+      const freshInvites = await fetchVendorInvitations();
+      setVendorInvitations(freshInvites);
+    }
+  };
+
+  // Vendor: Accept Invitation
+  const handleAcceptInvite = async (inviteId: string, orgId: string) => {
+    if (!currentUser?.vendorId) return;
+    const { error: affError } = await supabase.from('vendor_affiliations').insert({
+      vendor_id: currentUser.vendorId,
+      organization_id: orgId
+    });
+    if (affError) {
+      addToast(`Error: ${affError.message}`, 'warning');
+      return;
+    }
+    await supabase.from('vendor_invitations').update({ status: 'accepted' }).eq('id', inviteId);
+    addToast('Invitation accepted! You can now handle jobs for this organization.', 'success');
+    
+    const [freshAffils, freshInvites, freshRequests] = await Promise.all([
+      fetchVendorAffiliations(),
+      fetchVendorInvitations(),
+      fetchRequests()
+    ]);
+    setVendorAffiliations(freshAffils);
+    setVendorInvitations(freshInvites);
+    setRequests(freshRequests);
+  };
+
+  // Vendor: Decline Invitation
+  const handleDeclineInvite = async (inviteId: string) => {
+    await supabase.from('vendor_invitations').update({ status: 'declined' }).eq('id', inviteId);
+    addToast('Invitation declined.', 'info');
+    const freshInvites = await fetchVendorInvitations();
+    setVendorInvitations(freshInvites);
+  };
+
+  // OrgAdmin: Add Facility
+  const handleCreateFacilityOrg = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFacilityName.trim() || !newFacilityAddress.trim()) return;
+    const generatedId = `fac-${Math.floor(Math.random() * 1000000)}`;
+    const newFacUrl = `/report?facilityId=${generatedId}&orgId=${selectedOrgId}`;
+    
+    const { error } = await supabase.from('facilities').insert({
+      id: generatedId,
+      organization_id: selectedOrgId,
+      name: newFacilityName,
+      address: newFacilityAddress,
+      description: newFacilityDesc,
+      qr_code_url: newFacUrl
+    });
+
+    if (error) {
+      addToast(`Error: ${error.message}`, 'warning');
+    } else {
+      addToast('Facility created successfully!', 'success');
+      setNewFacilityName('');
+      setNewFacilityAddress('');
+      setNewFacilityDesc('');
+      const freshFacs = await fetchFacilities();
+      setFacilities(freshFacs);
+    }
+  };
+
+  // Dynamic Navigation Menu Builder
+  const renderNavigation = () => {
+    if (currentRole === 'superadmin') {
+      return (
+        <nav className="nav-menu">
+          <button
+            className={`nav-btn ${activeTab === 'superadmin-dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('superadmin-dashboard')}
+          >
+            <LayoutDashboard size={16} /> Global Desk
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'organizations' ? 'active' : ''}`}
+            onClick={() => setActiveTab('organizations')}
+          >
+            <Building size={16} /> Organizations ({organizations.length})
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'users-mgmt' ? 'active' : ''}`}
+            onClick={() => setActiveTab('users-mgmt')}
+          >
+            <UserCircle size={16} /> User Accounts ({users.length})
+          </button>
+        </nav>
+      );
+    }
+
+    if (currentRole === 'admin') {
+      return (
+        <nav className="nav-menu">
+          <button
+            className={`nav-btn ${activeTab === 'org-dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('org-dashboard')}
+          >
+            <LayoutDashboard size={16} /> Org Dashboard
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'managers-list' ? 'active' : ''}`}
+            onClick={() => setActiveTab('managers-list')}
+          >
+            <UserCircle size={16} /> Managers
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'facilities-mgmt' ? 'active' : ''}`}
+            onClick={() => setActiveTab('facilities-mgmt')}
+          >
+            <Building size={16} /> Facilities ({facilities.filter(f => f.organizationId === selectedOrgId).length})
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'vendors-invite' ? 'active' : ''}`}
+            onClick={() => setActiveTab('vendors-invite')}
+          >
+            <Wrench size={16} /> Vendors & Invites
+          </button>
+        </nav>
+      );
+    }
+
+    if (currentRole === 'vendor') {
+      return (
+        <nav className="nav-menu">
+          <button
+            className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            <LayoutDashboard size={16} /> My Jobs
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'invites-affiliations' ? 'active' : ''}`}
+            onClick={() => setActiveTab('invites-affiliations')}
+          >
+            <Mail size={16} /> Invites & Partners
+          </button>
+        </nav>
+      );
+    }
+
+    if (currentRole === 'manager') {
+      return (
+        <nav className="nav-menu">
+          <button
+            className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('dashboard'); setActiveReportFacility(null); }}
+          >
+            <LayoutDashboard size={16} /> Dashboard
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'scanner' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('scanner'); setActiveReportFacility(null); }}
+          >
+            <QrCode size={16} /> Scan QR Portal
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'qr-manager' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('qr-manager'); setActiveReportFacility(null); }}
+          >
+            <PlusCircle size={16} /> QR Flyer Codes
+          </button>
+          <button
+            className={`nav-btn ${activeTab === 'vendor-mgmt' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('vendor-mgmt'); setActiveReportFacility(null); }}
+          >
+            <Wrench size={16} /> Vendors List
+          </button>
+        </nav>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2 text-[13px] font-bold text-app-primary">
+        <QrCode size={16} /> Mobile Repair Hotspot
+      </div>
+    );
+  };
+
   // State from LocalStorage
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -31,7 +503,7 @@ export default function App() {
   // Simulation Environment state
   const [selectedOrgId, setSelectedOrgId] = useState<string>('org-4');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [currentRole, setCurrentRole] = useState<'manager' | 'vendor' | 'tenant' | 'admin'>('manager');
+  const [currentRole, setCurrentRole] = useState<'manager' | 'vendor' | 'tenant' | 'admin' | 'superadmin'>('manager');
   const [darkMode, setDarkMode] = useState<boolean>(true);
 
   // App navigation state
@@ -138,12 +610,15 @@ export default function App() {
 
     const loadSupabaseData = async () => {
       setIsAuthLoading(true);
-      const [orgsDb, facilitiesDb, vendorsDb, usersDb, requestsDb] = await Promise.all([
+      const [orgsDb, facilitiesDb, vendorsDb, usersDb, requestsDb, affils, vInvites, mInvites] = await Promise.all([
         fetchOrganizations(),
         fetchFacilities(),
         fetchVendors(),
         fetchUsers(),
-        fetchRequests()
+        fetchRequests(),
+        fetchVendorAffiliations(),
+        fetchVendorInvitations(),
+        fetchMemberInvitations()
       ]);
 
       if (orgsDb.length > 0) setOrganizations(orgsDb);
@@ -151,6 +626,9 @@ export default function App() {
       if (vendorsDb.length > 0) setVendors(vendorsDb);
       if (usersDb.length > 0) setUsers(usersDb);
       if (requestsDb.length > 0) setRequests(requestsDb);
+      setVendorAffiliations(affils);
+      setVendorInvitations(vInvites);
+      setMemberInvitations(mInvites);
       setIsAuthLoading(false);
     };
 
@@ -242,7 +720,7 @@ export default function App() {
     setStatsFilterStatus('all');
   };
 
-  const handleRoleChange = (role: 'manager' | 'vendor' | 'tenant' | 'admin') => {
+  const handleRoleChange = (role: 'manager' | 'vendor' | 'tenant' | 'admin' | 'superadmin') => {
     setCurrentRole(role);
 
     if (role === 'tenant') {
@@ -260,7 +738,17 @@ export default function App() {
     } else if (role === 'admin') {
       const adminUser = users.find(u => u.role === 'admin') || null;
       setCurrentUser(adminUser);
-      setActiveTab('dashboard');
+      setActiveTab('org-dashboard');
+    } else if (role === 'superadmin') {
+      const superadminUser = users.find(u => u.role === 'superadmin') || {
+        id: 'usr-superadmin',
+        organizationId: '',
+        name: 'Platform SuperAdmin',
+        email: 'super@facilitrack.com',
+        role: 'superadmin'
+      };
+      setCurrentUser(superadminUser);
+      setActiveTab('superadmin-dashboard');
     }
 
     // Reset report facility
@@ -355,49 +843,6 @@ export default function App() {
     }
   };
 
-  // Vendor Management View State
-  const [newVenName, setNewVenName] = useState('');
-  const [newVenSpecialty, setNewVenSpecialty] = useState('');
-  const [newVenEmail, setNewVenEmail] = useState('');
-  const [newVenPhone, setNewVenPhone] = useState('');
-
-  const handleVendorSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newVenName.trim() || !newVenSpecialty.trim()) return;
-    const newId = `ven-${Math.floor(100 + Math.random() * 900)}`;
-    const newVendor: Vendor = {
-      id: newId,
-      organizationId: selectedOrgId,
-      name: newVenName,
-      specialty: newVenSpecialty,
-      email: newVenEmail,
-      phone: newVenPhone,
-      active: true
-    };
-
-    // Create simulated user account for vendor to sign in
-    const newVendorUser: User = {
-      id: `usr-ven-${Math.floor(100 + Math.random() * 900)}`,
-      organizationId: selectedOrgId,
-      name: `${newVenName} (Vendor)`,
-      email: newVenEmail,
-      role: 'vendor',
-      vendorId: newId
-    };
-
-    handleAddVendor(newVendor);
-
-    const updatedUsers = [...users, newVendorUser];
-    setUsers(updatedUsers);
-    localStorage.setItem('fm_users', JSON.stringify(updatedUsers));
-
-    setNewVenName('');
-    setNewVenSpecialty('');
-    setNewVenEmail('');
-    setNewVenPhone('');
-    alert('Vendor profile and login credentials created successfully!');
-  };
-
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
 
   const getVisibleRequests = () => {
@@ -472,7 +917,8 @@ export default function App() {
                 <option value="tenant">Resident / Tenant (QR Scanner)</option>
                 <option value="manager">Sarah/David (Facility Manager)</option>
                 <option value="vendor">John/Marcus (Contractor Vendor)</option>
-                <option value="admin">Alexander (Global SysAdmin)</option>
+                <option value="admin">Alexander (Org Admin)</option>
+                <option value="superadmin">SuperAdmin (Platform Owner)</option>
               </select>
             </div>
 
@@ -494,38 +940,7 @@ export default function App() {
           <span className="logo-text">FaciliTrack</span>
         </div>
 
-        {currentRole !== 'tenant' ? (
-          <nav className="nav-menu">
-            <button
-              className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('dashboard'); setActiveReportFacility(null); }}
-            >
-              <LayoutDashboard size={16} /> Dashboard
-            </button>
-            <button
-              className={`nav-btn ${activeTab === 'scanner' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('scanner'); setActiveReportFacility(null); }}
-            >
-              <QrCode size={16} /> Scan QR Portal
-            </button>
-            <button
-              className={`nav-btn ${activeTab === 'qr-manager' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('qr-manager'); setActiveReportFacility(null); }}
-            >
-              <PlusCircle size={16} /> QR Flyer Codes
-            </button>
-            <button
-              className={`nav-btn ${activeTab === 'vendor-mgmt' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('vendor-mgmt'); setActiveReportFacility(null); }}
-            >
-              <Wrench size={16} /> Vendors List
-            </button>
-          </nav>
-        ) : (
-          <div className="flex items-center gap-2 text-[13px] font-bold text-app-primary">
-            <QrCode size={16} /> Mobile Repair Hotspot
-          </div>
-        )}
+        {renderNavigation()}
 
         <div className="user-profile">
           <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
@@ -553,7 +968,6 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="main-content">
-
         {/* TENANT PORTAL - DIRECT MOBILE FIRST RESPONSIVE CONTAINER */}
         {currentRole === 'tenant' ? (
           <div className="mx-auto mb-10 w-full max-w-[600px] animate-[fadeIn_0.4s_ease]">
@@ -581,15 +995,568 @@ export default function App() {
           </div>
         ) : (
 
-          /* ADMINISTRATIVE VIEWS (MANAGER / VENDOR / SYSADMIN) */
+          /* ADMINISTRATIVE VIEWS (SUPERADMIN / ORGADMIN / MANAGER / VENDOR) */
           <div>
+            {/* 1. SUPERADMIN PANEL */}
+            {currentRole === 'superadmin' && activeTab === 'superadmin-dashboard' && (
+              <div>
+                <div className="mb-6">
+                  <h1 className="text-[28px] leading-tight text-white">Platform Master Control</h1>
+                  <p className="text-app-subtle">Global overview of registered tenants, platform workloads, and metrics.</p>
+                </div>
+                
+                <div className="stats-grid grid grid-cols-1 gap-4 sm:grid-cols-3 mb-6">
+                  <div className="stat-card glass-panel">
+                    <span className="stat-label">Organizations</span>
+                    <span className="stat-value text-indigo-400">{organizations.length}</span>
+                  </div>
+                  <div className="stat-card glass-panel">
+                    <span className="stat-label">Active Contractors</span>
+                    <span className="stat-value text-emerald-400">{vendors.length}</span>
+                  </div>
+                  <div className="stat-card glass-panel">
+                    <span className="stat-label">System Tickets</span>
+                    <span className="stat-value text-purple-400">{requests.length}</span>
+                  </div>
+                </div>
+
+                <div className="glass-panel">
+                  <h2 className="text-lg mb-4 text-white">All Active Requests</h2>
+                  <RequestList
+                    requests={requests}
+                    facilities={facilities}
+                    selectedOrgId={selectedOrgId}
+                    activeFilterStatus="all"
+                    onRequestClick={(req) => setSelectedRequest(req)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {currentRole === 'superadmin' && activeTab === 'organizations' && (
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-6">
+                <section className="glass-panel h-fit">
+                  <h3 className="text-base mb-4 font-bold text-white">Register New Tenant Organization</h3>
+                  <form onSubmit={handleCreateOrgAdmin} className="space-y-4">
+                    <div className="form-group">
+                      <label className="form-label">Organization Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Apex Commercial Real Estate"
+                        value={newOrgNameAdmin}
+                        onChange={(e) => setNewOrgNameAdmin(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Theme Branding Color</label>
+                      <input
+                        type="color"
+                        className="form-input h-10 p-1 bg-transparent cursor-pointer"
+                        value={newOrgColor}
+                        onChange={(e) => setNewOrgColor(e.target.value)}
+                      />
+                    </div>
+                    <button type="submit" className="glow-btn w-full py-2">Create Organization</button>
+                  </form>
+                </section>
+
+                <section className="glass-panel">
+                  <h3 className="text-base mb-4 font-bold text-white">Registered Organizations</h3>
+                  <div className="space-y-3">
+                    {organizations.map(org => (
+                      <div key={org.id} className="flex items-center justify-between p-3.5 border border-app-border rounded-lg bg-app-raised">
+                        <div>
+                          <h4 className="font-bold text-sm text-white">{org.name}</h4>
+                          <span className="text-[11px] text-app-muted">ID: {org.id}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="h-4 w-4 rounded-full border border-white/20" style={{ background: org.themeColor }} />
+                          <span className="text-xs text-app-muted">
+                            {facilities.filter(f => f.organizationId === org.id).length} Facilities
+                          </span>
+                          <button
+                            onClick={() => handleDeleteOrg(org.id)}
+                            className="p-1 px-2 text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-md border border-red-500/20 active:scale-95 transition-all"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {currentRole === 'superadmin' && activeTab === 'users-mgmt' && (
+              <div>
+                <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                  <div>
+                    <h1 className="text-[28px] leading-tight text-white">User Accounts Control</h1>
+                    <p className="text-app-subtle">See, edit, and delete all user accounts and profiles registered on the platform.</p>
+                  </div>
+                  <div className="flex max-w-[280px] items-center gap-2 rounded-lg border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-app-text">
+                    <input
+                      type="text"
+                      className="w-full bg-transparent outline-none placeholder:text-app-muted"
+                      placeholder="Search users..."
+                      value={userSearchQuery}
+                      onChange={(e) => setUserSearchQuery(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
+                  {/* Users List */}
+                  <section className="glass-panel">
+                    <h3 className="text-base mb-4 font-bold text-white">User Directory</h3>
+                    <div className="space-y-3">
+                      {users
+                        .filter(u => 
+                          u.name.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
+                          u.email.toLowerCase().includes(userSearchQuery.toLowerCase())
+                        )
+                        .map(user => {
+                          const userOrg = organizations.find(o => o.id === user.organizationId);
+                          return (
+                            <div key={user.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3.5 border border-app-border rounded-lg bg-app-raised gap-3">
+                              <div>
+                                <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                                  {user.name} 
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                                    user.role === 'superadmin' ? 'bg-red-500/10 text-red-400' :
+                                    user.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400' :
+                                    user.role === 'manager' ? 'bg-emerald-500/10 text-emerald-400' :
+                                    'bg-amber-500/10 text-amber-400'
+                                  }`}>
+                                    {user.role}
+                                  </span>
+                                </h4>
+                                <p className="text-xs text-app-muted mt-0.5">{user.email}</p>
+                                {userOrg && (
+                                  <p className="text-[11px] text-indigo-400 mt-1">Affiliation: {userOrg.name}</p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 sm:self-center self-end">
+                                <button
+                                  onClick={() => {
+                                    setEditingUser(user);
+                                    setEditUserName(user.name);
+                                    setEditUserRole(user.role as any);
+                                    setEditUserOrgId(user.organizationId || '');
+                                  }}
+                                  className="p-1 px-3 text-xs font-bold text-app-primary hover:text-white bg-app-primary/10 hover:bg-app-primary/20 rounded-md border border-app-primary/20 active:scale-95 transition-all"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteUser(user.id)}
+                                  className="p-1 px-3 text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-md border border-red-500/20 active:scale-95 transition-all"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </section>
+
+                  {/* Edit Section */}
+                  <section className="glass-panel h-fit">
+                    <h3 className="text-base mb-4 font-bold text-white">Edit User Profile</h3>
+                    {editingUser ? (
+                      <form onSubmit={handleUpdateUserSubmit} className="space-y-4">
+                        <div className="form-group">
+                          <label className="form-label">Full Name *</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={editUserName}
+                            onChange={(e) => setEditUserName(e.target.value)}
+                            required
+                          />
+                        </div>
+
+                        <div className="form-group">
+                          <label className="form-label">System Role *</label>
+                          <select
+                            className="form-input"
+                            value={editUserRole}
+                            onChange={(e) => setEditUserRole(e.target.value as any)}
+                          >
+                            <option value="superadmin">SuperAdmin</option>
+                            <option value="admin">OrgAdmin</option>
+                            <option value="manager">Manager</option>
+                            <option value="vendor">Vendor</option>
+                          </select>
+                        </div>
+
+                        {editUserRole !== 'superadmin' && editUserRole !== 'vendor' && (
+                          <div className="form-group">
+                            <label className="form-label">Organization Affiliation</label>
+                            <select
+                              className="form-input"
+                              value={editUserOrgId}
+                              onChange={(e) => setEditUserOrgId(e.target.value)}
+                            >
+                              <option value="">No Organization</option>
+                              {organizations.map(o => (
+                                <option key={o.id} value={o.id}>{o.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="flex gap-2">
+                          <button type="submit" className="glow-btn flex-1 py-2 text-xs">Save Changes</button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingUser(null)}
+                            className="flex-1 py-2 text-xs font-bold text-app-muted hover:text-white bg-white/5 border border-white/10 rounded-lg"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="text-center py-8 text-xs text-app-muted border border-dashed border-app-border rounded-lg">
+                        Select a user from the directory to edit their details.
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </div>
+            )}
+
+            {/* 2. ORGADMIN VIEW: ORG DASHBOARD */}
+            {currentRole === 'admin' && activeTab === 'org-dashboard' && (
+              <div>
+                <div className="mb-6">
+                  <h1 className="text-[28px] leading-tight text-white">{currentOrg?.name} Admin Desk</h1>
+                  <p className="text-app-subtle">Review repair tickets and facility conditions for your organization.</p>
+                </div>
+
+                <DashboardStats
+                  requests={visibleRequests}
+                  selectedOrgId={selectedOrgId}
+                  activeFilterStatus={statsFilterStatus}
+                  onFilterStatusChange={setStatsFilterStatus}
+                />
+
+                <div className="glass-panel mt-6">
+                  <h2 className="text-lg mb-4 text-white">Organization Tickets</h2>
+                  <RequestList
+                    requests={visibleRequests}
+                    facilities={facilities}
+                    selectedOrgId={selectedOrgId}
+                    activeFilterStatus={statsFilterStatus}
+                    onRequestClick={(req) => setSelectedRequest(req)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* ORGADMIN VIEW: MANAGERS LIST */}
+            {currentRole === 'admin' && activeTab === 'managers-list' && (
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-6">
+                <section className="glass-panel h-fit">
+                  <h3 className="text-base mb-4 font-bold text-white">Invite New Manager</h3>
+                  <p className="text-xs text-app-muted mb-4">
+                    Send an invitation to join your organization as a manager. They can sign up with this email.
+                  </p>
+                  <form onSubmit={handleInviteManager} className="space-y-4">
+                    <div className="form-group">
+                      <label className="form-label">Manager Email *</label>
+                      <input
+                        type="email"
+                        className="form-input"
+                        placeholder="manager@domain.com"
+                        value={newManagerEmail}
+                        onChange={(e) => setNewManagerEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="glow-btn w-full py-2">Send Invitation</button>
+                  </form>
+                </section>
+
+                <section className="glass-panel">
+                  <h3 className="text-base mb-4 font-bold text-white">Active Managers & Invites</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-app-muted mb-2">Team Managers</h4>
+                      <div className="space-y-2">
+                        {users.filter(u => u.organizationId === selectedOrgId && u.role === 'manager').map(mgr => (
+                          <div key={mgr.id} className="p-3 border border-app-border rounded-lg bg-app-raised flex justify-between items-center text-sm">
+                            <span className="font-bold text-white">{mgr.name}</span>
+                            <span className="text-xs text-app-muted">{mgr.email}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-app-border pt-4">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-app-muted mb-2">Pending Invitations</h4>
+                      <div className="space-y-2">
+                        {memberInvitations.filter(inv => inv.organizationId === selectedOrgId && inv.role === 'manager').length === 0 ? (
+                          <div className="text-xs text-app-muted text-center py-4 border border-dashed border-app-border rounded-lg">
+                            No pending invitations
+                          </div>
+                        ) : (
+                          memberInvitations.filter(inv => inv.organizationId === selectedOrgId && inv.role === 'manager').map(inv => (
+                            <div key={inv.id} className="p-3 border border-app-border rounded-lg bg-app-raised flex justify-between items-center text-sm">
+                              <span className="text-white">{inv.email}</span>
+                              <span className="text-xs font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">Invited</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {/* ORGADMIN VIEW: FACILITIES MGMT */}
+            {currentRole === 'admin' && activeTab === 'facilities-mgmt' && (
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-6">
+                <section className="glass-panel h-fit">
+                  <h3 className="text-base mb-4 font-bold text-white">Add New Facility</h3>
+                  <form onSubmit={handleCreateFacilityOrg} className="space-y-4">
+                    <div className="form-group">
+                      <label className="form-label">Facility Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Apex Office Center"
+                        value={newFacilityName}
+                        onChange={(e) => setNewFacilityName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Address *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="123 Corporate Dr, Austin TX"
+                        value={newFacilityAddress}
+                        onChange={(e) => setNewFacilityAddress(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Description</label>
+                      <textarea
+                        className="form-input"
+                        placeholder="Facility operations details..."
+                        value={newFacilityDesc}
+                        onChange={(e) => setNewFacilityDesc(e.target.value)}
+                      />
+                    </div>
+                    <button type="submit" className="glow-btn w-full py-2">Save Facility</button>
+                  </form>
+                </section>
+
+                <section className="glass-panel">
+                  <h3 className="text-base mb-4 font-bold text-white">Registered Facilities</h3>
+                  <div className="space-y-3">
+                    {facilities.filter(f => f.organizationId === selectedOrgId).map(fac => (
+                      <div key={fac.id} className="p-3.5 border border-app-border rounded-lg bg-app-raised flex justify-between items-center">
+                        <div>
+                          <h4 className="font-bold text-sm text-white">{fac.name}</h4>
+                          <p className="text-xs text-app-muted mt-0.5">{fac.address}</p>
+                        </div>
+                        <a 
+                          href={fac.qrCodeUrl}
+                          className="text-xs font-bold text-app-primary bg-indigo-500/10 px-3 py-1.5 rounded-lg hover:bg-indigo-500/20 active:scale-95 transition-all"
+                        >
+                          View QR Portal
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {/* ORGADMIN VIEW: VENDORS INVITE */}
+            {currentRole === 'admin' && activeTab === 'vendors-invite' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Search Platform Vendors */}
+                  <section className="glass-panel">
+                    <h3 className="text-base mb-3 font-bold text-white">Search & Affiliate Vendors</h3>
+                    <p className="text-xs text-app-muted mb-4">
+                      Search our global platform directory to find and invite trade specialists to partner with your organization.
+                    </p>
+                    <div className="form-group mb-4">
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Search by specialty or company name..."
+                        value={vendorSearchQuery}
+                        onChange={(e) => setVendorSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                      {vendors
+                        .filter(v => 
+                          (v.name.toLowerCase().includes(vendorSearchQuery.toLowerCase()) || 
+                          v.specialty.toLowerCase().includes(vendorSearchQuery.toLowerCase())) &&
+                          !vendorAffiliations.some(a => a.vendorId === v.id && a.organizationId === selectedOrgId)
+                        )
+                        .map(vendor => (
+                          <div key={vendor.id} className="p-3 border border-app-border rounded-lg bg-app-raised flex justify-between items-center">
+                            <div>
+                              <h4 className="font-bold text-sm text-white">{vendor.name}</h4>
+                              <span className="text-xs text-app-primary font-semibold">{vendor.specialty}</span>
+                            </div>
+                            {vendorInvitations.some(i => i.organizationId === selectedOrgId && i.email === vendor.email && i.status === 'pending') ? (
+                              <span className="text-xs bg-indigo-500/10 text-indigo-400 font-bold px-2.5 py-1 rounded-full">Invited</span>
+                            ) : (
+                              <button
+                                onClick={() => handleInviteVendor(vendor.email)}
+                                className="cursor-pointer text-xs font-bold text-app-primary bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded-lg active:scale-95 transition-all"
+                              >
+                                Send Invite
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </section>
+
+                  {/* Affiliated Vendors & Pending Invites */}
+                  <section className="glass-panel">
+                    <h3 className="text-base mb-4 font-bold text-white">Partner Vendor Network</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-app-muted mb-2">Linked Contractors</h4>
+                        <div className="space-y-2">
+                          {vendors.filter(v => vendorAffiliations.some(a => a.vendorId === v.id && a.organizationId === selectedOrgId)).length === 0 ? (
+                            <div className="text-xs text-app-muted text-center py-4 border border-dashed border-app-border rounded-lg">
+                              No partner contractors linked yet
+                            </div>
+                          ) : (
+                            vendors.filter(v => vendorAffiliations.some(a => a.vendorId === v.id && a.organizationId === selectedOrgId)).map(v => {
+                              const isRegistered = users.some(u => u.role === 'vendor' && u.vendorId === v.id);
+                              return (
+                                <div key={v.id} className="p-3 border border-app-border rounded-lg bg-app-raised flex justify-between items-center text-sm">
+                                  <div>
+                                    <span className="font-bold text-white block">{v.name}</span>
+                                    <span className="text-[11px] text-app-primary font-bold">{v.specialty}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-xs text-app-muted">{v.email}</span>
+                                    {isRegistered ? (
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-500">
+                                        Active
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-500 animate-pulse">
+                                        Invited
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-app-border pt-4">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-app-muted mb-2">Pending Vendor Invites</h4>
+                        <div className="space-y-2">
+                          {vendorInvitations.filter(i => i.organizationId === selectedOrgId && i.status === 'pending').length === 0 ? (
+                            <div className="text-xs text-app-muted text-center py-4 border border-dashed border-app-border rounded-lg">
+                              No pending vendor invitations
+                            </div>
+                          ) : (
+                            vendorInvitations.filter(i => i.organizationId === selectedOrgId && i.status === 'pending').map(inv => (
+                              <div key={inv.id} className="p-3 border border-app-border rounded-lg bg-app-raised flex justify-between items-center text-sm">
+                                <span className="text-white">{inv.email}</span>
+                                <span className="text-xs font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">Pending Response</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            )}
+
+            {/* 3. VENDOR VIEW: INVITES & AFFILIATIONS */}
+            {currentRole === 'vendor' && activeTab === 'invites-affiliations' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <section className="glass-panel">
+                  <h3 className="text-base mb-4 font-bold text-white">Incoming Partnership Invitations</h3>
+                  <div className="space-y-3">
+                    {vendorInvitations.filter(i => i.email === currentUser?.email && i.status === 'pending').length === 0 ? (
+                      <div className="text-xs text-app-muted text-center py-8 border border-dashed border-app-border rounded-lg">
+                        No new invitations at the moment.
+                      </div>
+                    ) : (
+                      vendorInvitations.filter(i => i.email === currentUser?.email && i.status === 'pending').map(invite => {
+                        const invOrg = organizations.find(o => o.id === invite.organizationId);
+                        return (
+                          <div key={invite.id} className="p-4 border border-app-border rounded-lg bg-app-raised flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                            <div>
+                              <h4 className="font-bold text-white text-sm">{invOrg?.name || 'Unknown Organization'}</h4>
+                              <p className="text-xs text-app-muted">Wants to add you as an active repair contractor</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleAcceptInvite(invite.id, invite.organizationId)}
+                                className="cursor-pointer text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg active:scale-95 transition-all"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => handleDeclineInvite(invite.id)}
+                                className="cursor-pointer text-xs font-bold text-app-muted hover:bg-slate-800 px-3 py-1.5 rounded-lg active:scale-95 transition-all"
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </section>
+
+                <section className="glass-panel">
+                  <h3 className="text-base mb-4 font-bold text-white">Affiliated Client Organizations</h3>
+                  <p className="text-xs text-app-muted mb-4">
+                    Below are the organizations you are linked with. You will receive active repair requests dispatched by these partners.
+                  </p>
+                  <div className="space-y-3">
+                    {organizations
+                      .filter(org => vendorAffiliations.some(a => a.organizationId === org.id && a.vendorId === currentUser?.vendorId))
+                      .map(org => (
+                        <div key={org.id} className="p-3.5 border border-app-border rounded-lg bg-app-raised flex justify-between items-center">
+                          <h4 className="font-bold text-sm text-white">{org.name}</h4>
+                          <span className="text-xs font-semibold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">Partnered</span>
+                        </div>
+                      ))}
+                  </div>
+                </section>
+              </div>
+            )}
 
             {/* View 1: DASHBOARD STATS & TICKET LISTING */}
-            {activeTab === 'dashboard' && (
+            {activeTab === 'dashboard' && currentRole !== 'superadmin' && (
               <div>
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h1 className="text-[28px] leading-tight">{currentOrg?.name} Operational Hub</h1>
+                    <h1 className="text-[28px] leading-tight text-white">{currentOrg?.name} Operational Hub</h1>
                     <p className="text-app-subtle">
                       Overview of facility repairs, dispatched vendors, and invoices.
                     </p>
@@ -615,7 +1582,7 @@ export default function App() {
                 {/* Ticket listing grid */}
                 <div className="glass-panel mt-6">
                   <div className="mb-[18px] flex items-center justify-between">
-                    <h2 className="text-lg">
+                    <h2 className="text-lg text-white">
                       Repair Requests
                       {statsFilterStatus !== 'all' && (
                         <span className="ml-2 text-[13px] capitalize text-app-primary">
@@ -755,38 +1722,44 @@ export default function App() {
                           No vendors are registered for this organization yet.
                         </div>
                       ) : (
-                        orgVendors.map(vendor => (
-                          <article key={vendor.id} className="vendor-card min-w-0 rounded-[10px] border border-app-border bg-app-raised p-3.5">
-                            <div className="vendor-card-main min-w-0">
-                              <div className="vendor-card-title-row flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                <h4 className="break-words text-[15px] leading-snug text-app-text">{vendor.name}</h4>
-                                <span className="vendor-status inline-flex min-h-6 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[11px] font-bold leading-none text-emerald-500">
-                                  <CheckCircle2 size={12} /> Active
-                                </span>
+                        orgVendors.map(vendor => {
+                          const isRegistered = users.some(u => u.role === 'vendor' && u.vendorId === vendor.id);
+                          return (
+                            <article key={vendor.id} className="vendor-card min-w-0 rounded-[10px] border border-app-border bg-app-raised p-3.5">
+                              <div className="vendor-card-main min-w-0">
+                                <div className="vendor-card-title-row flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                  <h4 className="break-words text-[15px] leading-snug text-app-text">{vendor.name}</h4>
+                                  {isRegistered ? (
+                                    <span className="vendor-status inline-flex min-h-6 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[11px] font-bold leading-none text-emerald-500">
+                                      <CheckCircle2 size={12} /> Active
+                                    </span>
+                                  ) : (
+                                    <span className="vendor-status inline-flex min-h-6 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-1 text-[11px] font-bold leading-none text-amber-500">
+                                      <Clock size={12} /> Invited
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="vendor-specialty mt-1.5 break-words text-xs font-bold text-app-primary">
+                                  {vendor.specialty}
+                                </div>
+                                <div className="vendor-contact-list mt-2.5 grid grid-cols-1 gap-1.5 text-xs text-app-muted sm:grid-cols-2">
+                                  <span className="vendor-contact-item flex min-w-0 items-center gap-1.5 break-words">
+                                    <Phone size={13} /> {vendor.phone || 'No phone'}
+                                  </span>
+                                  <span className="vendor-contact-item flex min-w-0 items-center gap-1.5 break-words">
+                                    <Mail size={13} /> {vendor.email || 'No email'}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="vendor-specialty mt-1.5 break-words text-xs font-bold text-app-primary">
-                                {vendor.specialty}
-                              </div>
-                              <div className="vendor-contact-list mt-2.5 grid grid-cols-1 gap-1.5 text-xs text-app-muted sm:grid-cols-2">
-                                <span className="vendor-contact-item flex min-w-0 items-center gap-1.5 break-words">
-                                  <Phone size={13} /> {vendor.phone || 'No phone'}
-                                </span>
-                                <span className="vendor-contact-item flex min-w-0 items-center gap-1.5 break-words">
-                                  <Mail size={13} /> {vendor.email || 'No email'}
-                                </span>
-                                <span>📞 {vendor.phone || 'No phone'}</span>
-                                <span>✉️ {vendor.email || 'No email'}</span>
-                              </div>
-                            </div>
-                          </article>
-                        ))
+                            </article>
+                          );
+                        })
                       )}
                     </div>
                   </section>
                 </div>
               </div>
             )}
-
           </div>
         )}
 
@@ -797,11 +1770,50 @@ export default function App() {
         <RequestDetailsModal
           request={selectedRequest}
           facility={facilities.find(f => f.id === selectedRequest.facilityId)!}
-          vendors={vendors.filter(v => v.organizationId === selectedRequest.organizationId)}
+          vendors={vendors.filter(v => vendorAffiliations.some(a => a.vendorId === v.id && a.organizationId === selectedRequest.organizationId))}
           currentUser={currentUser}
           onClose={() => setSelectedRequest(null)}
           onUpdateRequest={handleUpdateRequest}
         />
+      )}
+
+      {/* Vendor Invitation Link Modal */}
+      {activeInviteLink && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="glass-panel w-full max-w-[480px] p-6 animate-[scaleUp_0.25s_ease-out] relative">
+            <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              <Mail className="text-indigo-400" size={20} /> Vendor Sign Up Invitation
+            </h3>
+            <p className="text-xs text-app-muted mb-4 leading-normal">
+              Copy this personalized link and send it to the contractor. They can sign up instantly and associate their user account.
+            </p>
+            <div className="flex gap-2 mb-6">
+              <input
+                type="text"
+                readOnly
+                value={activeInviteLink}
+                className="form-input flex-1 font-mono text-[11px] bg-slate-950/80 border-white/10"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(activeInviteLink);
+                  addToast('Invitation link copied!', 'success');
+                }}
+                className="glow-btn px-4 py-2 text-xs font-bold whitespace-nowrap"
+              >
+                Copy Link
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setActiveInviteLink(null)}
+                className="cursor-pointer text-xs font-bold text-app-muted hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg active:scale-95 transition-all"
+              >
+                Close Dialog
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast notifications container */}

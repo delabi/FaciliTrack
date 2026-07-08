@@ -14,7 +14,7 @@ export interface Facility {
   qrCodeUrl: string; // URL inside the app to trigger a report e.g., "/report?facilityId=..."
 }
 
-export type UserRole = 'admin' | 'manager' | 'vendor' | 'tenant';
+export type UserRole = 'superadmin' | 'admin' | 'manager' | 'vendor' | 'tenant';
 
 export interface User {
   id: string;
@@ -23,6 +23,20 @@ export interface User {
   email: string;
   role: UserRole;
   vendorId?: string; // If role is 'vendor', maps to a Vendor profile
+}
+
+export interface VendorAffiliation {
+  vendorId: string;
+  organizationId: string;
+  createdAt?: string;
+}
+
+export interface VendorInvitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt?: string;
 }
 
 export interface Vendor {
