@@ -1779,7 +1779,7 @@ export default function App() {
                     selectedOrgId={selectedOrgId}
                     activeFilterStatus={statsFilterStatus}
                     onRequestClick={(req) => setSelectedRequest(req)}
-                    isVendorView={true}
+                    isVendorView={currentRole === 'vendor'}
                     selectedOrgFilter={vendorOrgFilter}
                     onOrgFilterChange={setVendorOrgFilter}
                   />
