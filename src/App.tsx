@@ -37,6 +37,7 @@ export default function App() {
   const [newOrgAdminName, setNewOrgAdminName] = useState('');
   const [newOrgAdminEmail, setNewOrgAdminEmail] = useState('');
   const [newOrgAdminPhone, setNewOrgAdminPhone] = useState('');
+  const [newOrgAdminPassword, setNewOrgAdminPassword] = useState('');
   const [newManagerEmail, setNewManagerEmail] = useState('');
   const [vendorSearchQuery, setVendorSearchQuery] = useState('');
   const [newFacilityName, setNewFacilityName] = useState('');
@@ -272,34 +273,67 @@ export default function App() {
         return;
       }
 
-      await supabase.from('member_invitations').insert({
-        organization_id: generatedOrgId,
-        email: newOrgAdminEmail.trim(),
-        role: 'admin'
-      });
+      const hasDefaultPassword = !!newOrgAdminPassword.trim();
 
-      try {
-        const { error: fnError } = await supabase.functions.invoke('send-invite', {
-          body: {
-            email: newOrgAdminEmail.trim(),
-            role: 'admin',
-            orgId: generatedOrgId
+      if (hasDefaultPassword) {
+        try {
+          const { error: fnError } = await supabase.functions.invoke('send-invite', {
+            body: {
+              action: 'create-user',
+              email: newOrgAdminEmail.trim(),
+              password: newOrgAdminPassword.trim(),
+              name: newOrgAdminName.trim(),
+              role: 'admin',
+              orgId: generatedOrgId
+            }
+          });
+          if (fnError) {
+            console.warn('Edge function failed:', fnError);
+            let errorMsg = fnError.message;
+            try {
+              const errBody = await fnError.context.json();
+              if (errBody && errBody.error) errorMsg = errBody.error;
+            } catch (e) {}
+            addToast(`Error pre-registering admin: ${errorMsg}`, 'warning');
+            return;
+          } else {
+            addToast('Organization created & Admin account pre-registered!', 'success');
           }
-        });
-        if (fnError) {
-          console.warn('Edge function failed:', fnError);
-          let errorMsg = fnError.message;
-          try {
-            const errBody = await fnError.context.json();
-            if (errBody && errBody.error) errorMsg = errBody.error;
-          } catch (e) {}
-          addToast(`Mailer notice: ${errorMsg}. Copy link manually.`, 'warning');
-        } else {
-          addToast('Organization created & Admin invitation email dispatched!', 'success');
+        } catch (err) {
+          console.warn('Edge function error:', err);
+          addToast('Could not pre-register Admin account.', 'warning');
+          return;
         }
-      } catch (err) {
-        console.warn('Edge function error:', err);
-        addToast('Could not reach invite service. Fallback link generated.', 'info');
+      } else {
+        await supabase.from('member_invitations').insert({
+          organization_id: generatedOrgId,
+          email: newOrgAdminEmail.trim(),
+          role: 'admin'
+        });
+
+        try {
+          const { error: fnError } = await supabase.functions.invoke('send-invite', {
+            body: {
+              email: newOrgAdminEmail.trim(),
+              role: 'admin',
+              orgId: generatedOrgId
+            }
+          });
+          if (fnError) {
+            console.warn('Edge function failed:', fnError);
+            let errorMsg = fnError.message;
+            try {
+              const errBody = await fnError.context.json();
+              if (errBody && errBody.error) errorMsg = errBody.error;
+            } catch (e) {}
+            addToast(`Mailer notice: ${errorMsg}. Copy link manually.`, 'warning');
+          } else {
+            addToast('Organization created & Admin invitation email dispatched!', 'success');
+          }
+        } catch (err) {
+          console.warn('Edge function error:', err);
+          addToast('Could not reach invite service. Fallback link generated.', 'info');
+        }
       }
 
       const freshOrgs = await fetchOrganizations();
@@ -328,6 +362,7 @@ export default function App() {
     setNewOrgAdminName('');
     setNewOrgAdminEmail('');
     setNewOrgAdminPhone('');
+    setNewOrgAdminPassword('');
   };
 
   // OrgAdmin: Invite Manager
@@ -1173,7 +1208,7 @@ export default function App() {
                         />
                       </div>
 
-                      <div className="form-group">
+                      <div className="form-group mb-3">
                         <label className="form-label">Admin Phone / Telephone</label>
                         <input
                           type="text"
@@ -1183,9 +1218,23 @@ export default function App() {
                           onChange={(e) => setNewOrgAdminPhone(e.target.value)}
                         />
                       </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Initial Default Password (optional)</label>
+                        <input
+                          type="password"
+                          className="form-input"
+                          placeholder="If set, admin account is pre-registered"
+                          value={newOrgAdminPassword}
+                          onChange={(e) => setNewOrgAdminPassword(e.target.value)}
+                        />
+                        <span className="text-[10px] text-app-muted mt-1 block">
+                          If omitted, the admin must register via email invitation.
+                        </span>
+                      </div>
                     </div>
 
-                    <button type="submit" className="glow-btn w-full py-2">Create Organization & Invite Admin</button>
+                    <button type="submit" className="glow-btn w-full py-2">Create Organization & Onboard Admin</button>
                   </form>
                 </section>
 

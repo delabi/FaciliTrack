@@ -83,6 +83,34 @@ serve(async (req) => {
       )
     }
 
+    if (action === 'create-user') {
+      const { email, password, name, role, orgId, vendorId } = body
+      if (!email || !password || !name) {
+        return new Response(
+          JSON.stringify({ error: 'Email, password, and name are required' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        )
+      }
+
+      const { data: userData, error: authError } = await supabaseClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          name,
+          role: role || 'admin',
+          organization_id: orgId || null,
+          vendor_id: vendorId || null
+        }
+      })
+      if (authError) throw authError
+
+      return new Response(
+        JSON.stringify({ message: 'User created successfully', user: userData.user }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      )
+    }
+
     // Default action: invite user by email
     const { email, role, orgId, vendorId } = body
     if (!email) {

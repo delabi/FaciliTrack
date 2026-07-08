@@ -21,11 +21,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Handle invite links in the URL parameter
+  // Password reset state
+  const [isResetRequest, setIsResetRequest] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+
+  // Handle invite links and password recovery in the URL parameter
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
     const type = params.get('inviteType');
     const emailParam = params.get('email');
+    const isRecovery = hash.includes('type=recovery') || hash.includes('access_token=') || params.get('mode') === 'reset';
+
+    if (isRecovery) {
+      setIsSignUp(false);
+      setIsResettingPassword(true);
+      return;
+    }
+
     if (type === 'vendor') {
       setIsSignUp(true);
       setSignUpType('vendor');
@@ -47,6 +61,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     setError(null);
 
     try {
+      if (isResetRequest) {
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/signup?mode=reset`
+        });
+        if (resetError) throw resetError;
+        setError('Password reset link sent! Please check your email to change your password.');
+        return;
+      }
+
+      if (isResettingPassword) {
+        if (!newPassword.trim()) throw new Error('Password cannot be empty');
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: newPassword.trim()
+        });
+        if (updateError) throw updateError;
+        setError('Password updated successfully! You can now sign in.');
+        setIsResettingPassword(false);
+        setNewPassword('');
+        window.location.hash = '';
+        return;
+      }
+
       if (isSignUp) {
         // 1. Check if this email has a pending member invitation (e.g. facility manager)
         const { data: memberInv, error: invError } = await supabase
@@ -184,13 +220,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             FaciliTrack Portal
           </h2>
           <p className="mt-1 text-sm text-app-muted">
-            {isSignUp ? 'Onboard a new organization or vendor profile' : 'Sign in to access your dashboard'}
+            {isResettingPassword ? 'Enter your new password below' :
+             isResetRequest ? 'Request a password reset link' :
+             isSignUp ? 'Onboard a new organization or vendor profile' : 
+             'Sign in to access your dashboard'}
           </p>
         </div>
 
         {error && (
           <div className={`mt-6 rounded-lg border p-3.5 text-center text-xs font-semibold ${
-            error.includes('successful') 
+            error.includes('successful') || error.includes('sent') || error.includes('updated')
               ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' 
               : 'border-red-500/20 bg-red-500/5 text-red-400'
           }`}>
@@ -199,167 +238,236 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         )}
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          {isSignUp && (
-            <div className="form-group">
-              <label className="form-label">Sign Up As</label>
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                <button
-                  type="button"
-                  onClick={() => setSignUpType('manager')}
-                  className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                    signUpType === 'manager'
-                      ? 'border-indigo-500 bg-indigo-500/10 text-white font-extrabold'
-                      : 'border-white/10 bg-white/5 text-app-muted hover:bg-white/10'
-                  }`}
-                >
-                  <Building2 size={14} /> Organization Manager
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSignUpType('vendor')}
-                  className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                    signUpType === 'vendor'
-                      ? 'border-indigo-500 bg-indigo-500/10 text-white font-extrabold'
-                      : 'border-white/10 bg-white/5 text-app-muted hover:bg-white/10'
-                  }`}
-                >
-                  <Wrench size={14} /> Repair Vendor
-                </button>
-              </div>
-            </div>
-          )}
-
-          {isSignUp && (
-            <div className="form-group">
-              <label className="form-label">Full Name</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
-                  <UserIcon size={16} />
-                </span>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. John Doe"
-                  className="form-input pl-9"
-                  style={{ paddingLeft: '2.5rem' }}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="form-group">
-            <label className="form-label">Email Address</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
-                <Mail size={16} />
-              </span>
-              <input
-                type="email"
-                required
-                placeholder="e.g. name@company.com"
-                className="form-input pl-9"
-                style={{ paddingLeft: '2.5rem' }}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
-                <Key size={16} />
-              </span>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                className="form-input pl-9"
-                style={{ paddingLeft: '2.5rem' }}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {isSignUp && signUpType === 'vendor' && (
+          {isResettingPassword ? (
             <>
               <div className="form-group">
-                <label className="form-label">Company Name *</label>
+                <label className="form-label">New Password</label>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
-                    <Building2 size={16} />
+                    <Key size={16} />
                   </span>
                   <input
-                    type="text"
-                    required={!email} // Optional if they signed up using invite link with prefilled profile
-                    placeholder="e.g. Apex Electrical Services"
+                    type="password"
+                    required
+                    placeholder="Enter your new password"
                     className="form-input pl-9"
                     style={{ paddingLeft: '2.5rem' }}
-                    value={vendorName}
-                    onChange={(e) => setVendorName(e.target.value)}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+              
+              <button type="submit" disabled={loading} className="glow-btn w-full mt-4 py-2 flex items-center justify-center gap-2 cursor-pointer">
+                {loading ? 'Saving...' : 'Save New Password'}
+              </button>
+
+              <button type="button" onClick={() => { setIsResettingPassword(false); setError(null); }} className="w-full text-center text-xs text-app-muted hover:text-white mt-2 transition-colors cursor-pointer bg-transparent border-0">
+                Back to Sign In
+              </button>
+            </>
+          ) : isResetRequest ? (
+            <>
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                    <Mail size={16} />
+                  </span>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. name@company.com"
+                    className="form-input pl-9"
+                    style={{ paddingLeft: '2.5rem' }}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+              
+              <button type="submit" disabled={loading} className="glow-btn w-full mt-4 py-2 flex items-center justify-center gap-2 cursor-pointer">
+                {loading ? 'Sending...' : 'Send Reset Link'}
+              </button>
+
+              <button type="button" onClick={() => { setIsResetRequest(false); setError(null); }} className="w-full text-center text-xs text-app-muted hover:text-white mt-2 transition-colors cursor-pointer bg-transparent border-0">
+                Back to Sign In
+              </button>
+            </>
+          ) : (
+            <>
+              {isSignUp && (
+                <div className="form-group">
+                  <label className="form-label">Sign Up As</label>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setSignUpType('manager')}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                        signUpType === 'manager'
+                          ? 'border-indigo-500 bg-indigo-500/10 text-white font-extrabold'
+                          : 'border-white/10 bg-white/5 text-app-muted hover:bg-white/10'
+                      }`}
+                    >
+                      <Building2 size={14} /> Organization Manager
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSignUpType('vendor')}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                        signUpType === 'vendor'
+                          ? 'border-indigo-500 bg-indigo-500/10 text-white font-extrabold'
+                          : 'border-white/10 bg-white/5 text-app-muted hover:bg-white/10'
+                      }`}
+                    >
+                      <Wrench size={14} /> Repair Vendor
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {isSignUp && (
+                <div className="form-group">
+                  <label className="form-label">Full Name</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                      <UserIcon size={16} />
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. John Doe"
+                      className="form-input pl-9"
+                      style={{ paddingLeft: '2.5rem' }}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                    <Mail size={16} />
+                  </span>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. name@company.com"
+                    className="form-input pl-9"
+                    style={{ paddingLeft: '2.5rem' }}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                   />
                 </div>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Trade / Specialty *</label>
+                <div className="flex justify-between items-center">
+                  <label className="form-label">Password</label>
+                  {!isSignUp && (
+                    <button type="button" onClick={() => { setIsResetRequest(true); setError(null); }} className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer bg-transparent border-0">
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
-                    <Wrench size={16} />
+                    <Key size={16} />
                   </span>
                   <input
-                    type="text"
-                    required={!email}
-                    placeholder="e.g. HVAC, Plumbing, Electrical"
+                    type="password"
+                    required
+                    placeholder="••••••••"
                     className="form-input pl-9"
                     style={{ paddingLeft: '2.5rem' }}
-                    value={vendorSpecialty}
-                    onChange={(e) => setVendorSpecialty(e.target.value)}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                   />
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Contact Phone</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
-                    <Phone size={16} />
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="e.g. 512-555-0199"
-                    className="form-input pl-9"
-                    style={{ paddingLeft: '2.5rem' }}
-                    value={vendorPhone}
-                    onChange={(e) => setVendorPhone(e.target.value)}
-                  />
-                </div>
-              </div>
+              {isSignUp && signUpType === 'vendor' && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Company Name *</label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                        <Building2 size={16} />
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Rapid Plumbing Services"
+                        className="form-input pl-9"
+                        style={{ paddingLeft: '2.5rem' }}
+                        value={vendorName}
+                        onChange={(e) => setVendorName(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Trade Specialty *</label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                        <Wrench size={16} />
+                      </span>
+                      <input
+                        type="text"
+                        required={!email}
+                        placeholder="e.g. HVAC, Plumbing, Electrical"
+                        className="form-input pl-9"
+                        style={{ paddingLeft: '2.5rem' }}
+                        value={vendorSpecialty}
+                        onChange={(e) => setVendorSpecialty(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Contact Phone</label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                        <Phone size={16} />
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="e.g. 512-555-0199"
+                        className="form-input pl-9"
+                        style={{ paddingLeft: '2.5rem' }}
+                        value={vendorPhone}
+                        onChange={(e) => setVendorPhone(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="glow-btn w-full justify-center py-2.5 text-sm font-bold disabled:opacity-50 cursor-pointer"
+              >
+                {loading ? 'Authenticating...' : isSignUp ? 'Sign Up' : 'Sign In'}
+              </button>
             </>
           )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="glow-btn w-full justify-center py-2.5 text-sm font-bold disabled:opacity-50 cursor-pointer"
-          >
-            {loading ? 'Authenticating...' : isSignUp ? 'Sign Up' : 'Sign In'}
-          </button>
         </form>
 
-        <div className="mt-6 text-center text-xs">
-          <button
-            type="button"
-            className="font-semibold text-app-primary hover:underline cursor-pointer bg-transparent border-0"
-            onClick={() => setIsSignUp(!isSignUp)}
-          >
-            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-          </button>
-        </div>
+        {!isResetRequest && !isResettingPassword && (
+          <div className="mt-6 text-center text-xs">
+            <button
+              type="button"
+              className="font-semibold text-app-primary hover:underline cursor-pointer bg-transparent border-0"
+              onClick={() => { setIsSignUp(!isSignUp); setError(null); }}
+            >
+              {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
