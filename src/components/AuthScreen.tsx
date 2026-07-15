@@ -298,7 +298,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">6-digit Verification Code (OTP)</label>
+                <label className="form-label">Verification Code (OTP)</label>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
                     <Key size={16} />
@@ -306,7 +306,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   <input
                     type="text"
                     required
-                    placeholder="Enter the 6-digit OTP code"
+                    placeholder="Enter the OTP code from your email"
                     className="form-input pl-9"
                     style={{ paddingLeft: '2.5rem' }}
                     value={otpToken}
@@ -398,7 +398,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 onClick={() => { setIsVerifyOtp(true); setIsResetRequest(false); setError(null); }} 
                 className="w-full text-center text-xs text-indigo-400 hover:text-indigo-300 mt-3 transition-colors cursor-pointer bg-transparent border-0 font-bold"
               >
-                Use 6-digit OTP Code instead
+                Use OTP Verification Code instead
               </button>
 
               <button type="button" onClick={() => { setIsResetRequest(false); setError(null); }} className="w-full text-center text-xs text-app-muted hover:text-white mt-2 transition-colors cursor-pointer bg-transparent border-0">
