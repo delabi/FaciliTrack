@@ -721,26 +721,31 @@ export default function App() {
 
     const loadSupabaseData = async () => {
       setIsAuthLoading(true);
-      const [orgsDb, facilitiesDb, vendorsDb, usersDb, requestsDb, affils, vInvites, mInvites] = await Promise.all([
-        fetchOrganizations(),
-        fetchFacilities(),
-        fetchVendors(),
-        fetchUsers(),
-        fetchRequests(),
-        fetchVendorAffiliations(),
-        fetchVendorInvitations(),
-        fetchMemberInvitations()
-      ]);
+      try {
+        const [orgsDb, facilitiesDb, vendorsDb, usersDb, requestsDb, affils, vInvites, mInvites] = await Promise.all([
+          fetchOrganizations(),
+          fetchFacilities(),
+          fetchVendors(),
+          fetchUsers(),
+          fetchRequests(),
+          fetchVendorAffiliations(),
+          fetchVendorInvitations(),
+          fetchMemberInvitations()
+        ]);
 
-      if (orgsDb.length > 0) setOrganizations(orgsDb);
-      if (facilitiesDb.length > 0) setFacilities(facilitiesDb);
-      if (vendorsDb.length > 0) setVendors(vendorsDb);
-      if (usersDb.length > 0) setUsers(usersDb);
-      if (requestsDb.length > 0) setRequests(requestsDb);
-      setVendorAffiliations(affils);
-      setVendorInvitations(vInvites);
-      setMemberInvitations(mInvites);
-      setIsAuthLoading(false);
+        if (orgsDb.length > 0) setOrganizations(orgsDb);
+        if (facilitiesDb.length > 0) setFacilities(facilitiesDb);
+        if (vendorsDb.length > 0) setVendors(vendorsDb);
+        if (usersDb.length > 0) setUsers(usersDb);
+        if (requestsDb.length > 0) setRequests(requestsDb);
+        setVendorAffiliations(affils);
+        setVendorInvitations(vInvites);
+        setMemberInvitations(mInvites);
+      } catch (err) {
+        console.error('Error loading Supabase data:', err);
+      } finally {
+        setIsAuthLoading(false);
+      }
     };
 
     return () => subscription.unsubscribe();
@@ -970,7 +975,7 @@ export default function App() {
   const visibleRequests = getVisibleRequests();
   const orgVendors = vendors.filter(v => v.organizationId === selectedOrgId);
 
-  if (isSupabaseConfigured && isAuthLoading) {
+  if (isSupabaseConfigured && (isAuthLoading || (session && !currentUser))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#090d16] text-white">
         <div className="flex flex-col items-center gap-3">
@@ -1067,7 +1072,7 @@ export default function App() {
             </div>
             <div className="hidden text-left md:block">
               <div className="user-info-text">{currentUser?.name || 'User'}</div>
-              <div className="user-role-label">{currentUser?.role.toUpperCase()} • {currentOrg?.name}</div>
+              <div className="user-role-label">{currentUser?.role?.toUpperCase() || ''} • {currentOrg?.name}</div>
             </div>
           </div>
           {isSupabaseConfigured && (
