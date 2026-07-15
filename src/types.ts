@@ -25,6 +25,8 @@ export interface User {
   email: string;
   role: UserRole;
   vendorId?: string; // If role is 'vendor', maps to a Vendor profile
+  phone?: string;
+  avatarUrl?: string;
 }
 
 export interface VendorAffiliation {

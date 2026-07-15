@@ -20,6 +20,7 @@ import { QrCodeManager } from './components/QrCodeManager';
 import { DashboardStats } from './components/DashboardStats';
 import { RequestList } from './components/RequestList';
 import { RequestDetailsModal } from './components/RequestDetailsModal';
+import { UserProfileModal } from './components/UserProfileModal';
 import {
   Building, Wrench, Shield, Sun, Moon, LayoutDashboard, QrCode, PlusCircle, CheckCircle2, UserCircle, Phone, Mail, Clock
 } from 'lucide-react';
@@ -625,6 +626,7 @@ export default function App() {
 
   // Selected request for details modal
   const [selectedRequest, setSelectedRequest] = useState<RepairRequest | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
 
   // Dashboard filter state (from clicking metric cards)
   const [statsFilterStatus, setStatsFilterStatus] = useState<string>('all');
@@ -663,7 +665,9 @@ export default function App() {
           name: profile.name,
           email: profile.email,
           role: profile.role,
-          vendorId: profile.vendor_id || undefined
+          vendorId: profile.vendor_id || undefined,
+          phone: profile.phone || undefined,
+          avatarUrl: profile.avatar_url || undefined
         };
         setCurrentUser(userObj);
         setCurrentRole(profile.role);
@@ -671,6 +675,35 @@ export default function App() {
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
+    }
+  };
+
+  const handleUpdateProfile = async (updatedData: { name: string; phone?: string; avatarUrl?: string }) => {
+    if (!currentUser) return;
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          name: updatedData.name,
+          phone: updatedData.phone || null,
+          avatar_url: updatedData.avatarUrl || null,
+        })
+        .eq('id', currentUser.id);
+
+      if (error) throw error;
+      addToast('Profile updated successfully!', 'success');
+      await loadUserProfile(currentUser.id);
+    } else {
+      const updatedUser = {
+        ...currentUser,
+        name: updatedData.name,
+        phone: updatedData.phone,
+        avatarUrl: updatedData.avatarUrl
+      };
+      setCurrentUser(updatedUser);
+      setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+      addToast('Profile updated successfully (Offline Sandbox)!', 'success');
     }
   };
 
@@ -1066,9 +1099,22 @@ export default function App() {
           <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
             {darkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <div className="user-badge">
-            <div className="user-avatar" style={{ background: currentOrg?.themeColor || 'var(--primary)' }}>
-              {currentUser?.name ? currentUser.name[0].toUpperCase() : 'U'}
+          <div 
+            className="user-badge cursor-pointer hover:bg-app-raised/50 active:scale-95 transition-all p-1.5 rounded-lg flex items-center gap-2 border border-transparent hover:border-indigo-500/20"
+            onClick={() => setIsProfileModalOpen(true)}
+            title="Edit Profile"
+          >
+            <div 
+              className="user-avatar overflow-hidden" 
+              style={currentUser?.avatarUrl ? { 
+                backgroundImage: `url(${currentUser.avatarUrl})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center'
+              } : { 
+                background: currentOrg?.themeColor || 'var(--primary)' 
+              }}
+            >
+              {!currentUser?.avatarUrl && (currentUser?.name ? currentUser.name[0].toUpperCase() : 'U')}
             </div>
             <div className="hidden text-left md:block">
               <div className="user-info-text">{currentUser?.name || 'User'}</div>
@@ -2004,6 +2050,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* User Profile Modal */}
+      {currentUser && (
+        <UserProfileModal
+          user={currentUser}
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          onSave={handleUpdateProfile}
+        />
       )}
 
       {/* Toast notifications container */}
