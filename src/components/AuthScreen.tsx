@@ -32,6 +32,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     const hash = window.location.hash;
     const type = params.get('inviteType');
     const emailParam = params.get('email');
+
+    // Handle any hash errors (e.g. expired or invalid recovery link)
+    if (hash.includes('error=')) {
+      const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+      const errorDesc = hashParams.get('error_description');
+      if (errorDesc) {
+        setError(decodeURIComponent(errorDesc.replace(/\+/g, ' ')));
+        window.location.hash = '';
+        return;
+      }
+    }
+
     const isRecovery = hash.includes('type=recovery') || hash.includes('access_token=') || params.get('mode') === 'reset';
 
     if (isRecovery) {
