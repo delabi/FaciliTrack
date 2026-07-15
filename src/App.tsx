@@ -784,6 +784,29 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Synchronize activeTab when role changes to prevent blank screen
+  useEffect(() => {
+    if (currentRole === 'superadmin') {
+      if (activeTab !== 'superadmin-dashboard' && activeTab !== 'organizations' && activeTab !== 'users-mgmt') {
+        setActiveTab('superadmin-dashboard');
+      }
+    } else if (currentRole === 'admin') {
+      if (activeTab !== 'org-dashboard' && activeTab !== 'managers-list' && activeTab !== 'facilities-mgmt' && activeTab !== 'vendors-invite') {
+        setActiveTab('org-dashboard');
+      }
+    } else if (currentRole === 'vendor') {
+      if (activeTab !== 'dashboard' && activeTab !== 'invites-affiliations') {
+        setActiveTab('dashboard');
+      }
+    } else if (currentRole === 'manager') {
+      if (activeTab !== 'dashboard' && activeTab !== 'scanner' && activeTab !== 'qr-manager' && activeTab !== 'vendor-mgmt') {
+        setActiveTab('dashboard');
+      }
+    } else if (currentRole === 'tenant') {
+      setActiveTab('dashboard');
+    }
+  }, [currentRole]);
+
   // Realtime Supabase Subscription for automatic UI updates
   useEffect(() => {
     if (!isSupabaseConfigured) return;
