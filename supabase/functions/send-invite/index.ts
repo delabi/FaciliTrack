@@ -122,7 +122,7 @@ serve(async (req) => {
 
     // Securely invite user via Auth Admin API
     const { data, error } = await supabaseClient.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${req.headers.get('origin') || 'http://localhost:5173'}/signup`,
+      redirectTo: `${req.headers.get('origin') || 'https://facilitrack.polyrational.com'}/signup`,
       data: {
         role: role || 'manager',
         organization_id: orgId || null,
