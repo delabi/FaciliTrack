@@ -25,6 +25,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [isResetRequest, setIsResetRequest] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
+  const [isVerifyOtp, setIsVerifyOtp] = useState(false);
+  const [otpToken, setOtpToken] = useState('');
 
   // Handle invite links and password recovery in the URL parameter
   useEffect(() => {
@@ -73,12 +75,37 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     setError(null);
 
     try {
+      if (isVerifyOtp) {
+        if (!email.trim()) throw new Error('Email is required');
+        if (!otpToken.trim()) throw new Error('OTP token is required');
+        if (!newPassword.trim()) throw new Error('New password cannot be empty');
+        
+        const { error: otpError } = await supabase.auth.verifyOtp({
+          email: email.trim(),
+          token: otpToken.trim(),
+          type: 'recovery'
+        });
+        if (otpError) throw otpError;
+
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: newPassword.trim()
+        });
+        if (updateError) throw updateError;
+
+        setError('Password updated successfully! You can now sign in.');
+        setIsVerifyOtp(false);
+        setIsResetRequest(false);
+        setOtpToken('');
+        setNewPassword('');
+        return;
+      }
+
       if (isResetRequest) {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/signup?mode=reset`
         });
         if (resetError) throw resetError;
-        setError('Password reset link sent! Please check your email to change your password.');
+        setError('Password reset link sent! Please check your email to change your password (or copy the OTP code from the email).');
         return;
       }
 
@@ -250,7 +277,71 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         )}
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          {isResettingPassword ? (
+          {isVerifyOtp ? (
+            <>
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                    <Mail size={16} />
+                  </span>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. name@company.com"
+                    className="form-input pl-9"
+                    style={{ paddingLeft: '2.5rem' }}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">6-digit Verification Code (OTP)</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                    <Key size={16} />
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Enter the 6-digit OTP code"
+                    className="form-input pl-9"
+                    style={{ paddingLeft: '2.5rem' }}
+                    value={otpToken}
+                    onChange={(e) => setOtpToken(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">New Password</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-app-muted">
+                    <Key size={16} />
+                  </span>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Enter your new password"
+                    className="form-input pl-9"
+                    style={{ paddingLeft: '2.5rem' }}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <button type="submit" disabled={loading} className="glow-btn w-full mt-4 py-2 flex items-center justify-center gap-2 cursor-pointer">
+                {loading ? 'Updating...' : 'Update Password'}
+              </button>
+
+              <button type="button" onClick={() => { setIsVerifyOtp(false); setError(null); }} className="w-full text-center text-xs text-app-muted hover:text-white mt-2 transition-colors cursor-pointer bg-transparent border-0">
+                Cancel
+              </button>
+            </>
+          ) : isResettingPassword ? (
             <>
               <div className="form-group">
                 <label className="form-label">New Password</label>
@@ -300,6 +391,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               
               <button type="submit" disabled={loading} className="glow-btn w-full mt-4 py-2 flex items-center justify-center gap-2 cursor-pointer">
                 {loading ? 'Sending...' : 'Send Reset Link'}
+              </button>
+
+              <button 
+                type="button" 
+                onClick={() => { setIsVerifyOtp(true); setIsResetRequest(false); setError(null); }} 
+                className="w-full text-center text-xs text-indigo-400 hover:text-indigo-300 mt-3 transition-colors cursor-pointer bg-transparent border-0 font-bold"
+              >
+                Use 6-digit OTP Code instead
               </button>
 
               <button type="button" onClick={() => { setIsResetRequest(false); setError(null); }} className="w-full text-center text-xs text-app-muted hover:text-white mt-2 transition-colors cursor-pointer bg-transparent border-0">
